@@ -1,0 +1,423 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Briscola a 5</title>
+    <link rel="manifest" href="/manifest.json">
+    <meta name="theme-color" content="#d4af37">
+    <link rel="apple-touch-icon" href="/icon.png">
+    <style>
+        :root { --table-color: #0d5226; --table-border: #3d2b1f; --card-width: 60px; --card-height: 96px; --avatar-size: 45px; }
+        @media (max-width: 768px) { :root { --card-width: 35px; --card-height: 56px; --avatar-size: 28px; } }
+
+        body { font-family: 'Segoe UI', sans-serif; background: #111; color: white; margin: 0; height: 100vh; height: 100dvh; width: 100%; overflow: hidden; display: flex; user-select: none; -webkit-user-select: none; touch-action: manipulation; }
+        #app-wrapper { display: flex; width: 100%; height: 100%; }
+        #game-area { flex-grow: 1; position: relative; background: radial-gradient(circle, #1a6b35, #051a0a); display: none; overflow: hidden; }
+        #chat-sidebar { width: 300px; background: #1a1a1a; border-left: 2px solid #d4af37; display: flex; flex-direction: column; z-index: 1000; }
+        @media (max-width: 768px) { #app-wrapper { flex-direction: column; } #game-area { height: 55%; width: 100%; } #chat-sidebar { width: 100%; height: 45%; border-left: none; border-top: 2px solid #d4af37; } .player-info { padding: 1px 3px !important; } }
+
+        #chat-header { padding: 5px; background: #d4af37; color: black; font-weight: bold; text-align: center; font-size: 12px; flex-shrink: 0;}
+        #chat-messages { flex-grow: 1; overflow-y: auto; padding: 10px; font-size: 13px; display: flex; flex-direction: column; gap: 6px; background: #111;}
+        #chat-input-area { padding: 8px; background: #222; display: flex; gap: 5px; flex-shrink: 0; padding-bottom: max(8px, env(safe-area-inset-bottom)); z-index: 2001; position: relative; }
+        #chat-input { flex-grow: 1; padding: 10px; border: 1px solid #555; background: #333; color: white; border-radius: 4px; outline:none; font-size: 16px; }
+        #chat-send { width: 50px; background: #d4af37; border: none; cursor: pointer; color: black; font-weight: bold; border-radius: 4px; font-size: 18px;}
+        .msg { padding: 6px 10px; border-radius: 8px; max-width: 85%; word-wrap: break-word; line-height: 1.3; }
+        .msg-mine { background: #006400; align-self: flex-end; border-bottom-right-radius: 0; }
+        .msg-other { background: #444; align-self: flex-start; border-bottom-left-radius: 0; }
+        .msg-name { font-size: 10px; color: #aaa; margin-bottom: 2px; font-weight: bold; }
+
+        #login, #lobby { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); background: rgba(16, 16, 16, 0.98); padding: 30px; border: 2px solid #d4af37; z-index: 2000; text-align: center; border-radius: 15px; width: 85%; max-width: 320px; box-shadow: 0 0 50px rgba(0,0,0,0.8); }
+        #lobby { padding: 20px; max-height: 80vh; overflow-y: auto; }
+        @media (max-width: 768px) { #lobby { top: auto; width: 90%; transform: translateX(-50%); max-height: 40vh; padding: 15px; bottom: 10px; } #chat-sidebar { height: 50% !important; z-index: 1000; } }
+
+        /* Nuovo Modal per la Chiamata */
+        #chiamata-modal { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.85); z-index: 3000; display: none; justify-content: center; align-items: center; flex-direction: column; backdrop-filter: blur(5px); }
+        #chiamata-box { background: #222; border: 2px solid #d4af37; border-radius: 15px; padding: 20px; text-align: center; width: 80%; max-width: 300px; box-shadow: 0 0 30px rgba(212, 175, 55, 0.3); }
+        .chiamata-btn { padding: 10px; margin: 5px; font-weight: bold; border-radius: 5px; cursor: pointer; border: none; background: #d4af37; color: black; }
+        .chiamata-btn:active { transform: scale(0.95); }
+
+        input, select { padding: 12px; width: 90%; margin-bottom: 15px; text-align: center; background: #222; color: white; border: 1px solid #555; border-radius: 5px; font-size: 16px;}
+        button { padding: 12px; cursor: pointer; background: #d4af37; border: none; font-weight: bold; width: 100%; border-radius: 5px; font-size: 16px; text-transform: uppercase; color: #000; transition: 0.2s;}
+        button:active { transform: scale(0.98); }
+        
+        .btn-secondary { background: #444; color: #ccc; border: 1px solid #666; font-size: 12px; padding: 8px; margin-top: 10px; width: auto;}
+        .btn-danger { background: #661111; color: white; border: 1px solid #ff4444; width: auto; font-size: 11px; padding: 6px 10px; position: absolute; top: 5px; left: 5px; z-index: 2000; }
+        .btn-restart { background: #111166; color: white; border: 1px solid #4444ff; width: auto; font-size: 11px; padding: 6px 10px; position: absolute; top: 5px; right: 5px; z-index: 2000; }
+        
+        #briscola-display { position: absolute; top: 5px; left: 50%; transform: translateX(-50%); z-index: 2000; font-size: 12px; padding: 5px 10px; background: rgba(0,0,0,0.8); border-radius: 6px; border: 2px solid #d4af37; color: #fff; font-weight: bold; white-space: nowrap; display: none;}
+        #btn-music { position: absolute; top: 5px; left: 5px; z-index: 2000; width: 30px; height: 30px; padding: 0; font-size: 16px; border-radius: 50%; background: #333; border: 1px solid #777; color: white; display: none; align-items: center; justify-content: center; }
+
+        #felt { position: absolute; top: 45%; left: 50%; transform: translate(-50%, -50%); width: 94%; height: 65%; border: 6px solid #3d2b1f; background: #0d5226; border-radius: 80px; box-shadow: inset 0 0 50px rgba(0,0,0,0.7); }
+        .player-seat { position: absolute; width: 90px; height: 80px; transform: translate(-50%, -50%); text-align: center; font-size: 12px; transition: 0.5s; z-index: 10; display: flex; flex-direction: column; align-items: center;}
+        
+        .avatar { width: var(--avatar-size); height: var(--avatar-size); background: #222; border-radius: 50%; display: flex; align-items: center; justify-content: center; border: 2px solid #666; font-size: 14px; font-weight: bold; box-shadow: 0 3px 6px rgba(0,0,0,0.5); flex-shrink: 0; }
+        .active-turn .avatar { border-color: gold; box-shadow: 0 0 15px gold; transform: scale(1.15); }
+        
+        .player-info { background: rgba(0,0,0,0.9); padding: 4px 8px; border-radius: 6px; margin-top: 4px; border: 1px solid #555; color: #fff; white-space: nowrap; font-size: 12px !important; font-weight: bold; box-shadow: 0 2px 4px rgba(0,0,0,0.5); }
+        @media (max-width: 768px) { .player-seat { width: 70px; height: 60px; } .player-info { font-size: 10px !important; padding: 1px 3px; margin-top: 1px; line-height: 1.1; } }
+
+        .mini-card-container { display: flex; justify-content: center; margin-top: -10px; margin-bottom: 2px; }
+        .mini-card { width: 10px; height: 16px; background: repeating-linear-gradient(45deg, #2b3990, #2b3990 2px, #1a235a 2px, #1a235a 4px); border: 1px solid white; border-radius: 2px; margin: 0 1px; box-shadow: 0 1px 2px black; }
+
+        .played-card-slot { position: absolute; width: var(--card-width); height: var(--card-height); transform: translate(-50%, -50%); z-index: 20; transition: 0.3s;}
+        
+        .card { width: var(--card-width); height: var(--card-height); background: white; border-radius: 4px; cursor: pointer; box-shadow: 1px 1px 4px rgba(0,0,0,0.6); transition: 0.2s; position: relative;}
+        .card img { width: 100%; height: 100%; object-fit: fill; border-radius: 4px;}
+        .card-back { background: repeating-linear-gradient(45deg, #2b3990, #2b3990 5px, #1a235a 5px, #1a235a 10px); border: 2px solid #fff; }
+
+        #my-dashboard { position: absolute; bottom: 0; left:0; width: 100%; height: 90px; display: flex; justify-content: center; align-items: flex-end; padding-bottom: 5px; background: linear-gradient(to top, rgba(0,0,0,0.9), transparent); pointer-events: none; z-index: 100;}
+        #my-hand { display: flex; gap: 5px; pointer-events: auto; }
+        .hand-card:hover { transform: translateY(-15px) scale(1.1); z-index: 200; border: 1px solid gold; }
+
+        #center-status { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center; width: 95%; pointer-events: none; z-index: 500; }
+        #status-msg { font-size: 14px; font-weight: bold; color: #eee; text-shadow: 0 2px 4px black; background: rgba(0,0,0,0.8); padding: 8px 12px; border-radius: 10px; display: inline-block; line-height: 1.4; border: 1px solid #d4af37;}
+        
+        #controls { position: absolute; top: 60%; left: 50%; transform: translate(-50%, -50%); background: rgba(0,0,0,0.9); padding: 8px 12px; border: 1px solid gold; border-radius:10px; display: none; text-align: center; z-index: 1500; pointer-events: auto; width: 80%; max-width: 300px;}
+        #bid-buttons { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap;}
+        #bid-buttons button { padding: 10px; font-size: 14px; margin: 0; border-radius: 8px;}
+        
+        .card-css { width: 100%; height: 100%; display: flex; flex-direction: column; justify-content: center; align-items: center; background:#eee; color:#000; border:1px solid #999; }
+    </style>
+</head>
+<body>
+    <audio id="bg-music" loop><source src="/music.mp3" type="audio/mpeg"></audio>
+
+    <div id="chiamata-modal">
+        <div id="chiamata-box">
+            <h3 style="color:#d4af37; margin-top:0;">HAI VINTO L'ASTA!</h3>
+            <p style="color:#ccc; font-size:14px;">Chiama la tua Carta e Briscola</p>
+            <select id="chiamata-valore">
+                <option value="1">Asso</option>
+                <option value="3">Tre</option>
+                <option value="10">Re (10)</option>
+                <option value="9">Cavallo (9)</option>
+                <option value="8">Fante (8)</option>
+                <option value="7">Sette</option>
+                <option value="6">Sei</option>
+                <option value="5">Cinque</option>
+                <option value="4">Quattro</option>
+                <option value="2">Due</option>
+            </select>
+            <select id="chiamata-seme">
+                <option value="denari">Denari 🪙</option>
+                <option value="coppe">Coppe 🏆</option>
+                <option value="spade">Spade ⚔️</option>
+                <option value="bastoni">Bastoni 🏏</option>
+            </select>
+            <button class="chiamata-btn" onclick="inviaChiamata()">CONFERMA CHIAMATA</button>
+        </div>
+    </div>
+
+    <div id="app-wrapper">
+        <div id="game-area">
+            <button id="btn-music" onclick="toggleMusic()" style="display:none;">🔇</button>
+            <button class="btn-danger" onclick="leaveGame()">ABBANDONA 🏳️</button>
+            <div id="briscola-display">BRISCOLA: Da Scegliere</div>
+            
+            <div id="felt">
+                <div id="center-status"><div id="status-msg">TAVOLO PRONTO</div></div>
+                <div id="seats-container"></div>
+            </div>
+            
+            <div id="controls">
+                <div id="controls-title" style="color:#d4af37; margin-bottom:5px; font-size:12px; font-weight:bold;">FASE ASTA</div>
+                <div id="bid-buttons"></div>
+            </div>
+            
+            <div id="my-dashboard"><div id="my-hand"></div></div>
+        </div>
+
+        <div id="chat-sidebar" style="display:none; position:relative;">
+            <div id="chat-header">CHAT</div>
+            <div id="chat-messages"></div>
+            <div id="chat-input-area">
+                <div id="sticker-menu" style="display:none; position:absolute; bottom:100%; left:0; width:100%; background:#222; border-top:1px solid #d4af37; padding:10px; box-sizing:border-box; flex-wrap:wrap; gap:5px; max-height:150px; overflow-y:auto; z-index:1001;"></div>
+                <input type="file" id="camera-input" accept="image/*" capture="environment" style="display:none" onchange="sendPhoto(event)">
+                <button id="btn-camera" onclick="document.getElementById('camera-input').click()" style="width: 42px; height: 42px; background: #333; border: 1px solid #555; border-radius: 4px; cursor: pointer; font-size: 20px; padding: 0; flex-shrink: 0; display: flex; align-items: center; justify-content: center;">📷</button>
+                <button id="btn-sticker" onclick="toggleStickers()" style="width: 42px; height: 42px; background: #333; border: 1px solid #555; border-radius: 4px; cursor: pointer; font-size: 20px; padding: 0; flex-shrink: 0; display: flex; align-items: center; justify-content: center;">🤡</button>
+                <input type="text" id="chat-input" placeholder="Scrivi..." autocomplete="off">
+                <button id="chat-send" onclick="sendChat()">➤</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="login">
+        <h2 style="color:#d4af37; margin-top:0;">BRISCOLA A 5</h2>
+        <input id="username" placeholder="Tuo Nome" maxlength="20">
+        <input id="roomname" placeholder="Nome Stanza" maxlength="15">
+        <button onclick="join()">ENTRA</button>
+    </div>
+    
+    <div id="lobby" style="display:none">
+        <h3 style="color:#d4af37; margin-top:0;">SALA D'ATTESA</h3>
+        <div id="room-title" style="color:#888; font-size:12px; margin-bottom:10px;"></div>
+        <div id="lobby-list" style="color:#ccc; margin-bottom:15px; min-height:50px;"></div>
+        
+        <div id="host-controls" style="display:none; text-align:left; background:rgba(0,0,0,0.3); padding:10px; border-radius:8px; margin-top:15px;">
+            <p style="color:#aaa; font-size:12px; text-align:center;">Serve un totale di 5 giocatori esatti.</p>
+            <div style="display:flex; align-items:center; justify-content:space-between; background:#222; padding:8px 12px; border-radius:5px; margin-top:10px; border: 1px solid #444;">
+                <span style="color:#ccc; font-weight:bold; font-size: 14px;">AGGIUNGI BOT 🤖</span>
+                <div style="display:flex; gap:10px;">
+                <button onclick="removeBot()" style="width:35px; height:35px; padding:0; background:#661111; color:white; border-radius:5px; border:1px solid #ff4444; font-size:20px;">-</button>
+                <button onclick="addBot()" style="width:35px; height:35px; padding:0; background:#116611; color:white; border-radius:5px; border:1px solid #44ff44; font-size:20px;">+</button>
+            </div>
+        </div>
+            <button onclick="start()" style="margin-top:15px;">INIZIA PARTITA</button>
+        </div>
+        <div id="waiting-msg" style="color:#888; font-size:12px; margin-top:10px;">In attesa dell'Host o di 5 giocatori...</div>
+        <button class="btn-secondary" onclick="changeRoom()">🔙 CAMBIA STANZA</button>
+    </div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+        const socket = io();
+        let myId = null, isMyTurn = false;
+        window.activeId = null; 
+        
+        const ESTENSIONE = ".jpg"; 
+        const CARTELLE_LOCALE = "/carte/";
+        let currentTableState = [];
+        let currentMaxBid = 60;
+
+        let musicPlaying = false;
+        function toggleMusic() {
+            const audio = document.getElementById('bg-music');
+            const btn = document.getElementById('btn-music');
+            if (audio.paused) { audio.volume = 0.3; audio.play().then(() => { btn.innerText = "🔊"; musicPlaying = true; }).catch(e => console.log(e)); } else { audio.pause(); btn.innerText = "🔇"; musicPlaying = false; }
+        }
+
+        // --- GESTIONE STICKERS ---
+        // SOSTITUISCI QUESTO ARRAY CON LA TUA LISTA COMPLETA DI STICKER!
+        const myStickers = ['1.jpg', '2.jpg', '3.jpg']; 
+        
+        function toggleStickers() {
+            const menu = document.getElementById('sticker-menu');
+            if (menu.style.display === 'none') {
+                menu.style.display = 'flex';
+                if (menu.innerHTML.trim() === '') {
+                    myStickers.forEach(fileName => {
+                        const img = document.createElement('img');
+                        img.src = `/sticker/${fileName}`;
+                        img.style.width = '60px'; img.style.height = '60px'; img.style.objectFit = 'contain';
+                        img.style.cursor = 'pointer'; img.style.borderRadius = '5px'; img.style.backgroundColor = '#111';
+                        img.onclick = () => sendSticker(fileName);
+                        menu.appendChild(img);
+                    });
+                }
+            } else { menu.style.display = 'none'; }
+        }
+
+        function sendSticker(fileName) { socket.emit('sendChat', { text: fileName, type: 'sticker' }); document.getElementById('sticker-menu').style.display = 'none'; }
+        
+        function addBot() { socket.emit('addBot'); }
+        function removeBot() { socket.emit('removeBot'); }
+
+        socket.on('connect', () => { 
+            myId = socket.id; 
+            if(localStorage.getItem('briscola_username')) document.getElementById('username').value = localStorage.getItem('briscola_username');
+            if(localStorage.getItem('briscola_room')) document.getElementById('roomname').value = localStorage.getItem('briscola_room');
+        });
+
+        socket.on('warning', (msg) => { alert(msg); });
+        socket.on('errorMsg', (msg) => { alert(msg); resetToLogin(); });
+        socket.on('forceKick', () => { alert("Sei stato rimosso per inattività."); resetToLogin(); });
+
+        function resetToLogin() {
+            document.getElementById('game-area').style.display='none';
+            document.getElementById('lobby').style.display='none';
+            document.getElementById('chat-sidebar').style.display='none';
+            document.getElementById('login').style.display='block';
+            currentTableState = []; document.getElementById('my-hand').innerHTML = '';
+            document.getElementById('seats-container').innerHTML = '';
+            document.getElementById('chiamata-modal').style.display = 'none';
+        }
+
+        function changeRoom() { socket.emit('leaveRoom'); resetToLogin(); }
+        function leaveGame() { if (confirm("Sei sicuro di voler abbandonare la partita?")) { socket.emit('leaveGame'); resetToLogin(); } }
+
+        function escapeHTML(str) { if (!str) return ''; return str.replace(/[&<>'"]/g, tag => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[tag] || tag)); }
+
+        function sendChat() { const input = document.getElementById('chat-input'); const txt = input.value.trim(); if(txt) { socket.emit('sendChat', { text: txt, type: 'text' }); input.value = ''; input.focus(); } }
+        document.getElementById('chat-input').addEventListener("keypress", (e) => { if (e.key === "Enter") sendChat(); });
+
+        function sendPhoto(event) {
+            var file = event.target.files[0]; if (!file) return;
+            var reader = new FileReader();
+            reader.onload = function(e) {
+                var img = new Image();
+                img.onload = function() {
+                    var canvas = document.createElement('canvas'); var MAX_SIZE = 600; var width = img.width; var height = img.height;
+                    if (width > height) { if (width > MAX_SIZE) { height = Math.round(height * (MAX_SIZE / width)); width = MAX_SIZE; } } 
+                    else { if (height > MAX_SIZE) { width = Math.round(width * (MAX_SIZE / height)); height = MAX_SIZE; } }
+                    canvas.width = width; canvas.height = height; var ctx = canvas.getContext('2d');
+                    ctx.drawImage(img, 0, 0, width, height); var dataUrl = canvas.toDataURL('image/jpeg', 0.5); 
+                    socket.emit('sendChat', { text: dataUrl, type: 'photo' }); document.getElementById('camera-input').value = '';
+                }; img.src = e.target.result;
+            }; reader.readAsDataURL(file);
+        }
+
+        socket.on('chatMessage', (data) => {
+            const chatMessages = document.getElementById('chat-messages'); const msgDiv = document.createElement('div');
+            if (data.id === "SYS") msgDiv.className = 'msg msg-sys'; else msgDiv.className = (data.id === myId) ? 'msg msg-mine' : 'msg msg-other';
+            let content = (data.id !== "SYS" ? `<div class="msg-name">${data.name}</div>` : "");
+            if (data.type === 'sticker') content += `<img src="/sticker/${data.text}" style="width: 100px; border-radius: 5px; display: block;">`;
+            else if (data.type === 'photo') content += `<img src="${data.text}" style="max-width: 100%; max-height: 250px; border-radius: 8px; display: block;">`;
+            else { if (data.id === "SYS") content += data.text; else content += escapeHTML(data.text); }
+            msgDiv.innerHTML = content; chatMessages.appendChild(msgDiv); chatMessages.scrollTop = chatMessages.scrollHeight;
+        });
+
+        function renderCard(c, isHand, idx, isBack = false) {
+            const div = document.createElement('div');
+            div.className = isHand ? 'card hand-card' : 'card table-card';
+            if (isBack) { div.className += ' card-back'; } else {
+                const sMap = {'denari':'d', 'coppe':'c', 'spade':'s', 'bastoni':'b'};
+                const imgSrc = `${CARTELLE_LOCALE}${c.value}${sMap[c.suit]}${ESTENSIONE}`;
+                div.innerHTML = `<img src="${imgSrc}" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex'"><div class="card-css" style="display:none;color:black;padding-top:20px;font-size:10px;">${c.value}<br>${c.suit}</div>`;
+            }
+            if(isHand) div.onclick = () => play(idx, c);
+            return div;
+        }
+
+        function join() {
+            const name = document.getElementById('username').value.trim();
+            const roomName = document.getElementById('roomname').value.trim();
+            if(!name || !roomName) return alert("Inserisci Nome e Stanza!");
+            localStorage.setItem('briscola_username', name); localStorage.setItem('briscola_room', roomName);
+            socket.emit('join', { name: name, roomName: roomName });
+            document.getElementById('login').style.display='none'; document.getElementById('lobby').style.display='block';
+            document.getElementById('chat-sidebar').style.display='flex'; document.getElementById('room-title').innerText = "STANZA: " + roomName.toUpperCase();
+        }
+        
+        function start() { socket.emit('startGame'); }
+
+        function play(idx, c) {
+            if(!isMyTurn) return;
+            socket.emit('playCard', { cardIndex: idx });
+        }
+
+        function inviaChiamata() {
+            const v = document.getElementById('chiamata-valore').value;
+            const s = document.getElementById('chiamata-seme').value;
+            socket.emit('makeCall', { value: parseInt(v), suit: s });
+            document.getElementById('chiamata-modal').style.display = 'none';
+        }
+
+        socket.on('backToLobby', () => {
+            alert("Partita finita/resettata! Ritorno alla Lobby.");
+            document.getElementById('game-area').style.display = 'none'; document.getElementById('lobby').style.display = 'block';
+            currentTableState = []; document.getElementById('my-hand').innerHTML = ''; document.getElementById('seats-container').innerHTML = '';
+            document.getElementById('briscola-display').style.display = 'none';
+        });
+
+        socket.on('reconnectData', d => { 
+            switchToGameView(); 
+            window.activeId = (d.players && d.players[d.currentPlayerIndex]) ? d.players[d.currentPlayerIndex].id : null;
+            renderTable(d.players); 
+            const handDiv = document.getElementById('my-hand'); handDiv.innerHTML = '';
+            if(d.hand && d.hand.length > 0) { d.hand.forEach((c, i) => handDiv.appendChild(renderCard(c, true, i, false))); }
+            updateTable(d.table); 
+            updateTurn(d.isMyTurn, d.phase, d); 
+        });
+
+        function switchToGameView() { document.getElementById('login').style.display='none'; document.getElementById('lobby').style.display='none'; document.getElementById('game-area').style.display='block'; document.getElementById('chat-sidebar').style.display='flex'; }
+
+        socket.on('updatePlayers', d => {
+            const list = d.list || d; 
+            document.getElementById('lobby-list').innerHTML = list.map(x=>x.name + (x.isBot ? " 🤖" : "")).join('<br>');
+            if (d.isHost) { document.getElementById('host-controls').style.display = 'block'; document.getElementById('waiting-msg').style.display = 'none'; } 
+            else { document.getElementById('host-controls').style.display = 'none'; document.getElementById('waiting-msg').style.display = 'block'; }
+            renderTable(list); updateTable(currentTableState);
+        });
+
+        socket.on('updateHand', h => {
+            switchToGameView(); const div = document.getElementById('my-hand'); div.innerHTML=''; h.forEach((c, i) => div.appendChild(renderCard(c, true, i)));
+        });
+        
+        socket.on('briscolaUpdate', d => {
+            const el = document.getElementById('briscola-display');
+            if(d.suit && d.value) { el.style.display = 'block'; el.innerHTML = `BRISCOLA: ${d.value} di ${d.suit.toUpperCase()}`; }
+            else { el.style.display = 'none'; }
+        });
+
+        socket.on('tableUpdate', t => { currentTableState = t; updateTable(t); });
+        
+        socket.on('turnUpdate', d => { 
+            window.activeId = d.playerId; 
+            currentMaxBid = d.currentMaxBid || 60;
+            updateTurn(d.playerId===myId, d.phase, d); 
+            document.querySelectorAll('.player-seat').forEach(seat => {
+                if(seat.getAttribute('data-playerid') === d.playerId) seat.classList.add('active-turn');
+                else seat.classList.remove('active-turn');
+            });
+        });
+
+        socket.on('promptCall', () => { document.getElementById('chiamata-modal').style.display = 'flex'; });
+
+        socket.on('statusMsg', m => document.getElementById('status-msg').innerHTML = m);
+        socket.on('trickResult', m => { const el = document.getElementById('status-msg'); el.innerHTML=m; el.style.color='gold'; el.style.borderColor='gold'; setTimeout(()=> { el.style.color='#eee'; el.style.borderColor='#d4af37'; }, 2000); });
+        socket.on('gameOver', m => { alert(m); });
+
+        function updateTable(cards) { 
+            document.querySelectorAll('.played-card-slot').forEach(e=>e.innerHTML=''); 
+            cards.forEach((x, i) => { 
+                const slot = document.getElementById('slot-'+x.playerId);
+                if(slot) { const el = renderCard(x.card, false); slot.appendChild(el); } 
+            }); 
+        }
+
+        function updateTurn(isMine, phase, d) {
+            isMyTurn = isMine; document.getElementById('my-hand').style.opacity = isMine ? 1 : 0.6; 
+            const c = document.getElementById('controls');
+            
+            if(isMine && phase==='BIDDING') { 
+                c.style.display='block'; 
+                document.getElementById('controls-title').innerText = `ASTA (Attuale: ${currentMaxBid})`;
+                const b=document.getElementById('bid-buttons'); b.innerHTML=''; 
+                
+                let btnPass = document.createElement('button'); btnPass.innerText="PASSO"; btnPass.style.background="#444"; btnPass.style.color="white"; btnPass.onclick = () => socket.emit('placeBid', 'PASSO'); b.appendChild(btnPass);
+                
+                if(currentMaxBid < 120) {
+                    let nextBid = currentMaxBid === 60 ? 61 : currentMaxBid + 1;
+                    let btn1 = document.createElement('button'); btn1.innerText=`CHIAMA ${nextBid}`; btn1.onclick = () => socket.emit('placeBid', nextBid); b.appendChild(btn1);
+                }
+            } else c.style.display='none';
+        }
+
+        function renderTable(players) {
+            const con = document.getElementById('seats-container'); con.innerHTML='';
+            const myName = document.getElementById('username').value;
+            let idx = players.findIndex(p=>p.name===myName); if(idx===-1) idx=0;
+            const ordered = []; for(let i=0; i<players.length; i++) ordered.push(players[(idx+i)%players.length]);
+
+            ordered.forEach((p, i) => {
+                const deg = 90 + (i * (360/players.length)); const rad = deg * (Math.PI/180);
+                const cx = 50 + 42*Math.cos(rad), cy = 50 + 40*Math.sin(rad); 
+                const div = document.createElement('div');
+                const activeClass = p.id===window.activeId ? 'active-turn' : '';
+                
+                div.className = `player-seat ${activeClass}`;
+                if(p.passedBidding) div.style.opacity = "0.6"; // Grigi se hanno passato l'asta
+                div.style.left=cx+'%'; div.style.top=cy+'%';
+                div.setAttribute('data-playerid', p.id); 
+                
+                let infoBid = p.passedBidding ? "PASSATO" : (p.bid ? p.bid : "-");
+                let stats = `<div style="margin-top: 3px;"><span style="color:#ffff00">Asta: ${infoBid}</span><br>Punti: ${p.tricksWon}</div>`; 
+                let dealerIcon = p.isDealer ? `<span style="color:gold; margin-left:5px;">🃏</span>` : "";
+                
+                let handCardsHTML = "";
+                if(p.id !== myId && p.handCount > 0) { handCardsHTML = `<div class="mini-card-container">`; for(let k=0; k<p.handCount; k++) { handCardsHTML += `<div class="mini-card"></div>`; } handCardsHTML += `</div>`; }
+                
+                let infoStyle = ""; if (cy < 25 && cx > 40 && cx < 60) { infoStyle = "position: absolute; right: 105%; top: 50%; transform: translateY(-50%); margin-top: 0;"; }
+
+                div.innerHTML = `<div class="avatar">${p.name[0]}</div> ${handCardsHTML} <div class="player-info" style="${infoStyle}"><div style="color:#fff; font-weight:bold;">${p.name} ${dealerIcon}</div>${stats}</div>`;
+
+                const sx = 50 + 20*Math.cos(rad), sy = 50 + 20*Math.sin(rad);
+                const slot = document.createElement('div'); slot.id='slot-'+p.id; slot.className='played-card-slot';
+                slot.style.left=sx+'%'; slot.style.top=sy+'%';
+                con.appendChild(div); con.appendChild(slot);
+            });
+        }
+    </script>
+</body>
+</html>
