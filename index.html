@@ -31,9 +31,9 @@
         #lobby { padding: 20px; max-height: 80vh; overflow-y: auto; }
         @media (max-width: 768px) { #lobby { top: auto; width: 90%; transform: translateX(-50%); max-height: 40vh; padding: 15px; bottom: 10px; } #chat-sidebar { height: 50% !important; z-index: 1000; } }
 
-        /* Nuovo Modal per la Chiamata */
-        #chiamata-modal { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.85); z-index: 3000; display: none; justify-content: center; align-items: center; flex-direction: column; backdrop-filter: blur(5px); }
-        #chiamata-box { background: #222; border: 2px solid #d4af37; border-radius: 15px; padding: 20px; text-align: center; width: 80%; max-width: 300px; box-shadow: 0 0 30px rgba(212, 175, 55, 0.3); }
+        /* Nuovo Modal per la Chiamata - NON copre le carte in basso */
+        #chiamata-modal { position: absolute; top: 10%; left: 50%; transform: translateX(-50%); width: 100%; background: transparent; z-index: 3000; display: none; justify-content: center; align-items: center; flex-direction: column; pointer-events: none; }
+        #chiamata-box { pointer-events: auto; background: rgba(34, 34, 34, 0.95); border: 2px solid #d4af37; border-radius: 15px; padding: 20px; text-align: center; width: 85%; max-width: 320px; box-shadow: 0 10px 40px rgba(0,0,0,0.9); }
         .chiamata-btn { padding: 10px; margin: 5px; font-weight: bold; border-radius: 5px; cursor: pointer; border: none; background: #d4af37; color: black; }
         .chiamata-btn:active { transform: scale(0.95); }
 
@@ -373,13 +373,45 @@
             if(isMine && phase==='BIDDING') { 
                 c.style.display='block'; 
                 document.getElementById('controls-title').innerText = `ASTA (Attuale: ${currentMaxBid})`;
-                const b=document.getElementById('bid-buttons'); b.innerHTML=''; 
+                const b = document.getElementById('bid-buttons'); b.innerHTML=''; 
                 
-                let btnPass = document.createElement('button'); btnPass.innerText="PASSO"; btnPass.style.background="#444"; btnPass.style.color="white"; btnPass.onclick = () => socket.emit('placeBid', 'PASSO'); b.appendChild(btnPass);
+                let btnPass = document.createElement('button'); 
+                btnPass.innerText = "PASSO"; 
+                btnPass.style.background = "#444"; 
+                btnPass.style.color = "white"; 
+                btnPass.onclick = () => socket.emit('placeBid', 'PASSO'); 
+                b.appendChild(btnPass);
                 
                 if(currentMaxBid < 120) {
-                    let nextBid = currentMaxBid === 60 ? 61 : currentMaxBid + 1;
-                    let btn1 = document.createElement('button'); btn1.innerText=`CHIAMA ${nextBid}`; btn1.onclick = () => socket.emit('placeBid', nextBid); b.appendChild(btn1);
+                    let minBid = currentMaxBid === 60 ? 61 : currentMaxBid + 1;
+                    
+                    let inputContainer = document.createElement('div');
+                    inputContainer.style.display = 'flex';
+                    inputContainer.style.gap = '5px';
+                    inputContainer.style.alignItems = 'center';
+                    inputContainer.style.width = '100%';
+
+                    let bidInput = document.createElement('input');
+                    bidInput.type = 'number';
+                    bidInput.min = minBid;
+                    bidInput.max = 120;
+                    bidInput.value = minBid;
+                    bidInput.style.width = '70px';
+                    bidInput.style.padding = '10px';
+                    bidInput.style.margin = '0';
+                    bidInput.style.fontSize = '16px';
+                    
+                    let btnCall = document.createElement('button');
+                    btnCall.innerText = "CHIAMA";
+                    btnCall.onclick = () => {
+                        let val = parseInt(bidInput.value);
+                        if (val >= minBid && val <= 120) socket.emit('placeBid', val);
+                        else alert("Punteggio non valido! Il minimo chiamabile è " + minBid);
+                    };
+
+                    inputContainer.appendChild(bidInput);
+                    inputContainer.appendChild(btnCall);
+                    b.appendChild(inputContainer);
                 }
             } else c.style.display='none';
         }

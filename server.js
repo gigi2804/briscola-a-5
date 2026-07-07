@@ -151,8 +151,8 @@ io.on('connection', (socket) => {
         io.to(roomName).emit('chatMessage', { name: "SISTEMA", text: `🃏 Il chiamante ha scelto il <b>${data.value} di ${data.suit}</b> come Briscola!`, id: "SYS" });
         
         room.gameState = "PLAYING";
-        // Chi gioca per primo? Solitamente quello a destra del mazziere
-        room.firstPlayerIndex = (room.dealerIndex + 1) % 5;
+        // MODIFICA: Il primo a giocare è chi ha vinto l'asta (il chiamante)
+        room.firstPlayerIndex = room.players.findIndex(p => p.id === socket.id);
         room.currentPlayerIndex = room.firstPlayerIndex;
         
         broadcastUpdate(roomName); updateGameState(roomName);
