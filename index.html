@@ -106,8 +106,8 @@
         #center-status { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center; width: 95%; pointer-events: none; z-index: 500; }
         #status-msg { font-size: 14px; font-weight: bold; color: #eee; text-shadow: 0 2px 4px black; background: rgba(0,0,0,0.8); padding: 8px 12px; border-radius: 10px; display: inline-block; line-height: 1.4; border: 1px solid #d4af37;}
         
-        #controls { position: absolute; top: 60%; left: 50%; transform: translate(-50%, -50%); background: rgba(0,0,0,0.9); padding: 8px 12px; border: 1px solid gold; border-radius:10px; display: none; text-align: center; z-index: 1500; pointer-events: auto; width: 80%; max-width: 300px;}
-        #bid-buttons { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap;}
+        #controls { position: absolute; top: 60%; left: 50%; transform: translate(-50%, -50%); background: rgba(0,0,0,0.9); padding: 8px 15px; border: 1px solid gold; border-radius:10px; display: none; text-align: center; z-index: 1500; pointer-events: auto; width: auto; max-width: 250px; box-shadow: 0 5px 15px rgba(0,0,0,0.8);}
+        #bid-buttons { display: flex; gap: 8px; justify-content: center; align-items: center; flex-wrap: nowrap;}
         #bid-buttons button { padding: 10px; font-size: 14px; margin: 0; border-radius: 8px;}
         
         .card-css { width: 100%; height: 100%; display: flex; flex-direction: column; justify-content: center; align-items: center; background:#eee; color:#000; border:1px solid #999; }
@@ -208,6 +208,8 @@
         let myId = null, isMyTurn = false;
         window.activeId = null; 
         window.currentPhase = "LOBBY";
+        window.passTimers = {};
+        window.lastPlayersList = [];
         
         const ESTENSIONE = ".jpg"; 
         const CARTELLE_LOCALE = "/carte/";
@@ -358,6 +360,7 @@
 
         socket.on('updatePlayers', d => {
             const list = d.list || d; 
+            window.lastPlayersList = list;
             document.getElementById('lobby-list').innerHTML = list.map(x=>x.name + (x.isBot ? " 🤖" : "")).join('<br>');
             if (d.isHost) { document.getElementById('host-controls').style.display = 'block'; document.getElementById('waiting-msg').style.display = 'none'; } 
             else { document.getElementById('host-controls').style.display = 'none'; document.getElementById('waiting-msg').style.display = 'block'; }
@@ -414,6 +417,7 @@
                 btnPass.innerText = "PASSO"; 
                 btnPass.style.background = "#444"; 
                 btnPass.style.color = "white"; 
+                btnPass.style.padding = "8px";
                 btnPass.onclick = () => socket.emit('placeBid', 'PASSO'); 
                 b.appendChild(btnPass);
                 
@@ -424,20 +428,20 @@
                     inputContainer.style.display = 'flex';
                     inputContainer.style.gap = '5px';
                     inputContainer.style.alignItems = 'center';
-                    inputContainer.style.width = '100%';
 
                     let bidInput = document.createElement('input');
                     bidInput.type = 'number';
                     bidInput.min = minBid;
                     bidInput.max = 120;
                     bidInput.value = minBid;
-                    bidInput.style.width = '70px';
-                    bidInput.style.padding = '10px';
+                    bidInput.style.width = '60px';
+                    bidInput.style.padding = '8px 4px';
                     bidInput.style.margin = '0';
                     bidInput.style.fontSize = '16px';
                     
                     let btnCall = document.createElement('button');
                     btnCall.innerText = "CHIAMA";
+                    btnCall.style.padding = "8px";
                     btnCall.onclick = () => {
                         let val = parseInt(bidInput.value);
                         if (val >= minBid && val <= 120) socket.emit('placeBid', val);
@@ -456,6 +460,8 @@
             const myName = document.getElementById('username').value;
             let idx = players.findIndex(p=>p.name===myName); if(idx===-1) idx=0;
             const ordered = []; for(let i=0; i<players.length; i++) ordered.push(players[(idx+i)%players.length]);
+            // Trova la chiamata più alta attualmente al tavolo
+            let maxBid = Math.max(...players.map(x => x.bid || 0));
 
             ordered.forEach((p, i) => {
                 const deg = 90 + (i * (360/players.length)); const rad = deg * (Math.PI/180);
@@ -477,13 +483,31 @@
                 
                 let infoStyle = ""; if (cy < 25 && cx > 40 && cx < 60) { infoStyle = "position: absolute; right: 105%; top: 50%; transform: translateY(-50%); margin-top: 0;"; }
 
+                // LOGICA FUMETTI INTELLIGENTI
                 let speechBubble = "";
                 if (window.currentPhase === "BIDDING") {
                     if (p.passedBidding) {
-                        speechBubble = `<div class="speech-bubble bubble-pass">PASSO</div>`;
-                    } else if (p.bid !== null && p.bid !== undefined) {
-                        speechBubble = `<div class="speech-bubble bubble-bid">CHIAMA ${p.bid}</div>`;
+                        // Se ha appena passato, imposta il timer
+                        if (!window.passTimers[p.id]) {
+                            window.passTimers[p.id] = Date.now();
+                            // Tra 2 secondi, forza un aggiornamento per far sparire il fumetto
+                            setTimeout(() => { 
+                                if (window.currentPhase === "BIDDING") renderTable(window.lastPlayersList); 
+                            }, 2000);
+                        }
+                        // Mostra il fumetto solo se sono passati meno di 2 secondi
+                        if (Date.now() - window.passTimers[p.id] < 2000) {
+                            speechBubble = `<div class="speech-bubble bubble-pass">PASSO</div>`;
+                        }
+                    } else {
+                        window.passTimers[p.id] = null; // Resetta il timer se non ha passato
+                        // Mostra la chiamata solo se è attualmente la puntata massima!
+                        if (p.bid && p.bid === maxBid && p.bid > 0) {
+                            speechBubble = `<div class="speech-bubble bubble-bid">CHIAMA ${p.bid}</div>`;
+                        }
                     }
+                } else {
+                    window.passTimers[p.id] = null; // Pulizia quando l'asta finisce
                 }
 
                 div.innerHTML = `
