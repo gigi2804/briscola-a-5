@@ -8,6 +8,29 @@
     <meta name="theme-color" content="#d4af37">
     <link rel="apple-touch-icon" href="/icon.png">
     <style>
+        /* Fumetti per l'Asta */
+        .speech-bubble {
+            position: absolute;
+            bottom: 85px; /* Spinge il fumetto sopra l'avatar */
+            left: 50%;
+            transform: translateX(-50%);
+            padding: 4px 8px;
+            border-radius: 8px;
+            font-size: 11px;
+            font-weight: bold;
+            box-shadow: 0 3px 6px rgba(0,0,0,0.8);
+            z-index: 50;
+            white-space: nowrap;
+            animation: pop 0.2s ease-out;
+        }
+        .speech-bubble::after {
+            content: ""; position: absolute; top: 100%; left: 50%; margin-left: -5px; border-width: 5px; border-style: solid;
+        }
+        .bubble-pass { background: #ff4444; color: white; }
+        .bubble-pass::after { border-color: #ff4444 transparent transparent transparent; }
+        .bubble-bid { background: #fff; color: black; }
+        .bubble-bid::after { border-color: #fff transparent transparent transparent; }
+        @keyframes pop { 0% { transform: translateX(-50%) scale(0); } 100% { transform: translateX(-50%) scale(1); } }
         :root { --table-color: #0d5226; --table-border: #3d2b1f; --card-width: 60px; --card-height: 96px; --avatar-size: 45px; }
         @media (max-width: 768px) { :root { --card-width: 35px; --card-height: 56px; --avatar-size: 28px; } }
 
@@ -184,6 +207,7 @@
         const socket = io();
         let myId = null, isMyTurn = false;
         window.activeId = null; 
+        window.currentPhase = "LOBBY";
         
         const ESTENSIONE = ".jpg"; 
         const CARTELLE_LOCALE = "/carte/";
@@ -322,6 +346,7 @@
         socket.on('reconnectData', d => { 
             switchToGameView(); 
             window.activeId = (d.players && d.players[d.currentPlayerIndex]) ? d.players[d.currentPlayerIndex].id : null;
+            window.currentPhase = d.phase;
             renderTable(d.players); 
             const handDiv = document.getElementById('my-hand'); handDiv.innerHTML = '';
             if(d.hand && d.hand.length > 0) { d.hand.forEach((c, i) => handDiv.appendChild(renderCard(c, true, i, false))); }
@@ -353,6 +378,7 @@
         
         socket.on('turnUpdate', d => { 
             window.activeId = d.playerId; 
+            window.currentPhase = d.phase;
             currentMaxBid = d.currentMaxBid || 60;
             updateTurn(d.playerId===myId, d.phase, d); 
             document.querySelectorAll('.player-seat').forEach(seat => {
@@ -451,7 +477,22 @@
                 
                 let infoStyle = ""; if (cy < 25 && cx > 40 && cx < 60) { infoStyle = "position: absolute; right: 105%; top: 50%; transform: translateY(-50%); margin-top: 0;"; }
 
-                div.innerHTML = `<div class="avatar">${p.name[0]}</div> ${handCardsHTML} <div class="player-info" style="${infoStyle}"><div style="color:#fff; font-weight:bold;">${p.name} ${dealerIcon}</div>${stats}</div>`;
+                let speechBubble = "";
+                if (window.currentPhase === "BIDDING") {
+                    if (p.passedBidding) {
+                        speechBubble = `<div class="speech-bubble bubble-pass">PASSO</div>`;
+                    } else if (p.bid !== null && p.bid !== undefined) {
+                        speechBubble = `<div class="speech-bubble bubble-bid">CHIAMA ${p.bid}</div>`;
+                    }
+                }
+
+                div.innerHTML = `
+                    ${speechBubble}
+                    <div class="avatar">${p.name[0]}</div> 
+                    ${handCardsHTML} 
+                    <div class="player-info" style="${infoStyle}">
+                        <div style="color:#fff; font-weight:bold;">${p.name} ${dealerIcon}</div>${stats}
+                    </div>`;
 
                 const sx = 50 + 20*Math.cos(rad), sy = 50 + 20*Math.sin(rad);
                 const slot = document.createElement('div'); slot.id='slot-'+p.id; slot.className='played-card-slot';

@@ -121,14 +121,12 @@ io.on('connection', (socket) => {
         const p = room.players.find(x=>x.id===socket.id);
         if (bid === 'PASSO') {
             p.passedBidding = true;
-            io.to(roomName).emit('chatMessage', { name: "SISTEMA", text: `🗣️ <b>${p.name}</b> passa.`, id: "SYS" });
         } else {
             let val = parseInt(bid);
             if (val > room.currentMaxBid && val <= 120) {
                 room.currentMaxBid = val;
                 room.highestBidderId = p.id;
                 p.bid = val;
-                io.to(roomName).emit('chatMessage', { name: "SISTEMA", text: `🗣️ <b>${p.name}</b> chiama <b>${val}</b>!`, id: "SYS" });
             }
         }
         broadcastUpdate(roomName); nextTurnBidding(roomName); 
@@ -148,7 +146,6 @@ io.on('connection', (socket) => {
         });
         
         io.to(roomName).emit('briscolaUpdate', { suit: data.suit, value: data.value });
-        io.to(roomName).emit('chatMessage', { name: "SISTEMA", text: `🃏 Il chiamante ha scelto il <b>${data.value} di ${data.suit}</b> come Briscola!`, id: "SYS" });
         
         room.gameState = "PLAYING";
         // MODIFICA: Il primo a giocare è chi ha vinto l'asta (il chiamante)
@@ -188,10 +185,8 @@ function handleBotTurn(roomName) {
             if (room.currentMaxBid < 65 && Math.random() > 0.5) {
                 let val = room.currentMaxBid + 1;
                 room.currentMaxBid = val; room.highestBidderId = p.id; p.bid = val;
-                io.to(roomName).emit('chatMessage', { name: "SISTEMA", text: `🤖 <b>${p.name}</b> chiama <b>${val}</b>!`, id: "SYS" });
             } else {
                 p.passedBidding = true;
-                io.to(roomName).emit('chatMessage', { name: "SISTEMA", text: `🤖 <b>${p.name}</b> passa.`, id: "SYS" });
             }
             broadcastUpdate(roomName); nextTurnBidding(roomName);
 
@@ -204,7 +199,6 @@ function handleBotTurn(roomName) {
             room.players.forEach(pl => { if (pl.hand.find(c => c.value === 3 && c.suit === calledSuit)) { room.partnerId = pl.id; }});
             
             io.to(roomName).emit('briscolaUpdate', { suit: calledSuit, value: 3 });
-            io.to(roomName).emit('chatMessage', { name: "SISTEMA", text: `🤖 Il bot chiama il <b>3 di ${calledSuit}</b>.`, id: "SYS" });
             
             room.gameState = "PLAYING";
             room.firstPlayerIndex = (room.dealerIndex + 1) % 5; room.currentPlayerIndex = room.firstPlayerIndex;
@@ -280,7 +274,6 @@ function nextTurnBidding(roomName) {
         let winner = room.players.find(p => p.id === room.highestBidderId);
         if(!winner) winner = activeBidders[0] || room.players[room.firstPlayerIndex]; // Failsafe
         
-        io.to(roomName).emit('chatMessage', { name: "SISTEMA", text: `🏆 <b>${winner.name}</b> vince l'asta chiamando <b>${room.currentMaxBid}</b>!`, id: "SYS" });
         room.gameState = "CALLING";
         room.currentPlayerIndex = room.players.findIndex(p => p.id === winner.id);
         
@@ -369,7 +362,10 @@ function updateGameState(roomName) {
     const r = rooms[roomName]; if(!r) return; 
     let msg = "";
     if(r.gameState === "BIDDING") msg = `Asta: Tocca a ${r.players[r.currentPlayerIndex].name}`;
-    else if (r.gameState === "CALLING") msg = `Chiamata: Attendi ${r.players[r.currentPlayerIndex].name}`;
+    else if (r.gameState === "CALLING") {
+        const winner = r.players.find(p => p.id === r.highestBidderId);
+        msg = `🏆 ${winner ? winner.name : 'Qualcuno'} vince l'asta a ${r.currentMaxBid}!<br><span style="font-size:12px">Attendi che scelga la Briscola...</span>`;
+    }
     else msg = `Gioca: ${r.players[r.currentPlayerIndex].name}`;
     io.to(roomName).emit('statusMsg', msg); 
     io.to(roomName).emit('turnUpdate', { playerId: r.players[r.currentPlayerIndex].id, phase: r.gameState, currentMaxBid: r.currentMaxBid }); 
