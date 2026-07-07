@@ -34,6 +34,16 @@
         /* Nuovo Modal per la Chiamata - NON copre le carte in basso */
         #chiamata-modal { position: absolute; top: 10%; left: 50%; transform: translateX(-50%); width: 100%; background: transparent; z-index: 3000; display: none; justify-content: center; align-items: center; flex-direction: column; pointer-events: none; }
         #chiamata-box { pointer-events: auto; background: rgba(34, 34, 34, 0.95); border: 2px solid #d4af37; border-radius: 15px; padding: 20px; text-align: center; width: 85%; max-width: 320px; box-shadow: 0 10px 40px rgba(0,0,0,0.9); }
+
+        /* Ottimizzazione specifica per schermi piccoli (Smartphone) */
+        @media (max-width: 768px) {
+            #chiamata-modal { top: 2%; } /* Lo spinge al limite superiore dello schermo */
+            #chiamata-box { padding: 10px; width: 90%; }
+            #chiamata-box h3 { font-size: 16px; margin-bottom: 5px; }
+            #chiamata-box p { font-size: 11px; margin-bottom: 8px; margin-top: 0; }
+            #chiamata-box select { padding: 6px; margin-bottom: 8px; font-size: 14px; width: 95%; }
+            .chiamata-btn { padding: 8px; font-size: 14px; margin: 0; width: 95%; }
+        }
         .chiamata-btn { padding: 10px; margin: 5px; font-weight: bold; border-radius: 5px; cursor: pointer; border: none; background: #d4af37; color: black; }
         .chiamata-btn:active { transform: scale(0.95); }
 
@@ -304,7 +314,6 @@
         }
 
         socket.on('backToLobby', () => {
-            alert("Partita finita/resettata! Ritorno alla Lobby.");
             document.getElementById('game-area').style.display = 'none'; document.getElementById('lobby').style.display = 'block';
             currentTableState = []; document.getElementById('my-hand').innerHTML = ''; document.getElementById('seats-container').innerHTML = '';
             document.getElementById('briscola-display').style.display = 'none';

@@ -252,7 +252,12 @@ function startRound(roomName) {
   room.players.forEach(p => { 
       p.bid = null; p.tricksWon = 0; p.passedBidding = false;
       p.hand = room.deck.splice(0, 8);
-      p.hand.sort((a, b) => { const sOrder = {'bastoni': 1, 'spade': 2, 'coppe': 3, 'denari': 4}; if (sOrder[a.suit] !== sOrder[b.suit]) return sOrder[a.suit] - sOrder[b.suit]; return a.value - b.value; });
+      p.hand.sort((a, b) => { 
+    const sOrder = {'bastoni': 1, 'spade': 2, 'coppe': 3, 'denari': 4}; 
+    if (sOrder[a.suit] !== sOrder[b.suit]) return sOrder[a.suit] - sOrder[b.suit]; 
+    // Ordina dal più forte al più debole usando BRISCOLA_HIERARCHY
+    return BRISCOLA_HIERARCHY[b.value] - BRISCOLA_HIERARCHY[a.value]; 
+    });
   });
   
   room.players.forEach(p => { if (!p.isBot) io.to(p.id).emit('updateHand', p.hand); });
@@ -344,10 +349,13 @@ function endRoundLogic(roomName) {
     
     setTimeout(() => {
         if(rooms[roomName]) {
+            // Avanziamo il mazziere per la prossima partita
             room.dealerIndex = (room.dealerIndex + 1) % 5;
-            startRound(roomName);
+            
+            // Invece di avviare un nuovo round, resettiamo il tavolo e torniamo in lobby
+            resetGame(roomName);
         }
-    }, 8000);
+    }, 8000); // Aspetta 8 secondi per far leggere i risultati a schermo, poi torna in lobby
 }
 
 function resetGame(roomName) { 
