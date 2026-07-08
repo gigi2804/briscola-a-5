@@ -98,6 +98,12 @@
         .card { width: var(--card-width); height: var(--card-height); background: white; border-radius: 4px; cursor: pointer; box-shadow: 1px 1px 4px rgba(0,0,0,0.6); transition: 0.2s; position: relative;}
         .card img { width: 100%; height: 100%; object-fit: fill; border-radius: 4px;}
         .card-back { background: repeating-linear-gradient(45deg, #2b3990, #2b3990 5px, #1a235a 5px, #1a235a 10px); border: 2px solid #fff; }
+        .winning-card {
+            border: 2px solid gold !important;
+            box-shadow: 0 0 20px gold !important;
+            transform: translateY(-5px) scale(1.05); /* Effetto sollevamento */
+            z-index: 30; /* Assicura che sia sopra le altre */
+        }
 
         #my-dashboard { position: absolute; bottom: 0; left:0; width: 100%; height: 90px; display: flex; justify-content: center; align-items: flex-end; padding-bottom: 5px; background: linear-gradient(to top, rgba(0,0,0,0.9), transparent); pointer-events: none; z-index: 100;}
         #my-hand { display: flex; gap: 5px; pointer-events: auto; }
@@ -207,6 +213,8 @@
     <script>
         const socket = io();
         let myId = null, isMyTurn = false;
+        let currentBriscolaSuit = null;
+        const BRISCOLA_HIERARCHY = { 1: 100, 3: 90, 10: 80, 9: 70, 8: 60, 7: 50, 6: 40, 5: 30, 4: 20, 2: 10 };
         window.activeId = null; 
         window.currentPhase = "LOBBY";
         window.passTimers = {};
@@ -374,6 +382,7 @@
         
         socket.on('briscolaUpdate', d => {
             const el = document.getElementById('briscola-display');
+            currentBriscolaSuit = d.suit; // <--- SALVA LA BRISCOLA ATTUALE
             if(d.suit && d.value) { el.style.display = 'block'; el.innerHTML = `BRISCOLA: ${d.value} di ${d.suit.toUpperCase()}`; }
             else { el.style.display = 'none'; }
         });
@@ -397,11 +406,48 @@
         socket.on('trickResult', m => { const el = document.getElementById('status-msg'); el.innerHTML=m; el.style.color='gold'; el.style.borderColor='gold'; setTimeout(()=> { el.style.color='#eee'; el.style.borderColor='#d4af37'; }, 2000); });
         socket.on('gameOver', m => { alert(m); });
 
+        function getWinningPlayerId(tableCards) {
+            if (!tableCards || tableCards.length === 0) return null;
+            
+            let leadingSuit = tableCards[0].card.suit;
+            let winnerId = tableCards[0].playerId;
+            let maxPower = BRISCOLA_HIERARCHY[tableCards[0].card.value];
+            if (tableCards[0].card.suit === currentBriscolaSuit) maxPower += 1000;
+
+            for (let i = 1; i < tableCards.length; i++) {
+                let card = tableCards[i].card;
+                let power = BRISCOLA_HIERARCHY[card.value];
+                
+                if (card.suit === currentBriscolaSuit) {
+                    power += 1000;
+                } else if (card.suit !== leadingSuit) {
+                    power = -1;
+                }
+                
+                if (power > maxPower) {
+                    maxPower = power;
+                    winnerId = tableCards[i].playerId;
+                }
+            }
+            return winnerId;
+        }
+
         function updateTable(cards) { 
             document.querySelectorAll('.played-card-slot').forEach(e=>e.innerHTML=''); 
+            
+            // Trova chi sta vincendo in questo momento
+            let winningId = getWinningPlayerId(cards);
+
             cards.forEach((x, i) => { 
                 const slot = document.getElementById('slot-'+x.playerId);
-                if(slot) { const el = renderCard(x.card, false); slot.appendChild(el); } 
+                if(slot) { 
+                    const el = renderCard(x.card, false); 
+                    // Se questa carta appartiene a chi sta vincendo, applica l'effetto dorato
+                    if (x.playerId === winningId) {
+                        el.classList.add('winning-card');
+                    }
+                    slot.appendChild(el); 
+                } 
             }); 
         }
 
