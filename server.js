@@ -73,7 +73,11 @@ function createRoomState() {
         highestBidderId: null,
         briscolaSuit: null,
         calledCard: null,
-        partnerId: null
+        partnerId: null,
+        history: [],
+        is29: false,
+        currentRound: 1,      // NUOVO
+        maxRounds: 1          // NUOVO
     };
 }
 
@@ -97,7 +101,7 @@ io.on('connection', (socket) => {
         const roomName = socket.roomName; if (!roomName || !rooms[roomName]) return; const room = rooms[roomName];
         if (room.players.length >= 5) return socket.emit('warning', 'Il tavolo della Briscola a 5 prevede esattamente 5 posti!');
         const botId = "BOT_" + Math.random().toString(36).substr(2, 9);
-        room.players.push({ id: botId, name: "Bot_" + room.botCounter++, hand: [], bid: null, tricksWon: 0, isBot: true, passedBidding: false });
+        room.players.push({ id: botId, name: "Bot_" + room.botCounter++, hand: [], bid: null, tricksWon: 0, tournamentScore: 0, isBot: true, passedBidding: false });
         broadcastUpdate(roomName);
     });
 
@@ -136,14 +140,20 @@ io.on('connection', (socket) => {
         const room = rooms[sanitizedRoom];
         
         if (room.players.length >= 5) return socket.emit('errorMsg', 'Tavolo Pieno! La Briscola a 5 si gioca in 5.');
-        room.players.push({ id: socket.id, name, hand: [], bid: null, tricksWon: 0, isBot: false, passedBidding: false });
+        room.players.push({ id: socket.id, name, hand: [], bid: null, tricksWon: 0, tournamentScore: 0, isBot: false, passedBidding: false });
         broadcastUpdate(sanitizedRoom);
     });
 
-    socket.on('startGame', () => {
+    socket.on('startGame', (options) => {
         const roomName = socket.roomName; if (!roomName || !rooms[roomName]) return; const room = rooms[roomName];
         if (room.players[0].id !== socket.id) return;
-        if (room.players.length !== 5) return socket.emit('errorMsg', 'Devono esserci esattamente 5 giocatori (aggiungi Bot se necessario)!');
+        if (room.players.length !== 5) return socket.emit('errorMsg', 'Devono esserci esattamente 5 giocatori!');
+        
+        // Imposta i round e azzera i punteggi del torneo
+        room.maxRounds = (options && options.maxRounds) ? options.maxRounds : 1;
+        room.currentRound = 1;
+        room.players.forEach(p => p.tournamentScore = 0);
+        
         startRound(roomName);
     });
     
@@ -342,7 +352,7 @@ function broadcastUpdate(roomName) {
     room.players.forEach(p => {
         if (!p.isBot) {
             io.to(p.id).emit('updatePlayers', {
-                list: room.players.map((pl, idx) => ({ id: pl.id, name: pl.name, isBot: pl.isBot, tricksWon: pl.tricksWon, passedBidding: pl.passedBidding, bid: pl.bid, isDealer: (idx === room.dealerIndex), handCount: pl.hand.length })),
+                list: room.players.map((pl, idx) => ({ id: pl.id, name: pl.name, isBot: pl.isBot, tricksWon: pl.tricksWon, tournamentScore: pl.tournamentScore, passedBidding: pl.passedBidding, bid: pl.bid, isDealer: (idx === room.dealerIndex), handCount: pl.hand.length })),
                 isHost: (p.id === hostId) 
             });
         }
@@ -455,26 +465,77 @@ function endRoundLogic(roomName) {
     
     let pointsAttacking = caller.tricksWon + (partner && partner.id !== caller.id ? partner.tricksWon : 0);
     let win = pointsAttacking >= room.currentMaxBid;
+    let isCappotto = (pointsAttacking === 120 || pointsAttacking === 0);
     
-    let reportMsg = `📊 <b>FINE PARTITA</b> 📊<br><br>`;
+    // --- CALCOLO PUNTEGGI TORNEO ---
+    let bid = room.currentMaxBid;
+    let ptsChiamante = 2, ptsCompagno = 1, ptsAvversari = 1;
+
+    if (bid >= 60 && bid <= 79) { ptsChiamante = 2; ptsCompagno = 1; ptsAvversari = 1; }
+    else if (bid >= 80 && bid <= 89) { ptsChiamante = 4; ptsCompagno = 2; ptsAvversari = 2; }
+    else if (bid >= 90 && bid <= 99) { ptsChiamante = 6; ptsCompagno = 3; ptsAvversari = 3; }
+    else if (bid >= 100 && bid <= 109) { ptsChiamante = 8; ptsCompagno = 4; ptsAvversari = 4; }
+    else if (bid >= 110 && bid <= 120) { ptsChiamante = 12; ptsCompagno = 6; ptsAvversari = 6; }
+
+    if (isCappotto) { ptsChiamante *= 2; ptsCompagno *= 2; ptsAvversari *= 2; }
+
+    // Gestione della "Chiamata a sé stesso" (Gioca da solo vs 4)
+    let isSolitario = (!partner || partner.id === caller.id);
+
+    room.players.forEach(p => {
+        if (p.id === caller.id) {
+            // Se gioca da solo, assorbe anche i punti del compagno mancante
+            let pts = isSolitario ? (ptsChiamante + ptsCompagno) : ptsChiamante;
+            p.tournamentScore += win ? pts : -pts;
+        } else if (!isSolitario && partner && p.id === partner.id) {
+            p.tournamentScore += win ? ptsCompagno : -ptsCompagno;
+        } else {
+            // Avversari
+            p.tournamentScore += win ? -ptsAvversari : ptsAvversari;
+        }
+    });
+    // --------------------------------
+
+    let reportMsg = `📊 <b>FINE ROUND ${room.currentRound} / ${room.maxRounds}</b> 📊<br><br>`;
     reportMsg += `Chiamante: <b>${caller.name}</b> (Obiettivo: ${room.currentMaxBid})<br>`;
-    if (partner) reportMsg += `Compagno: <b>${partner.name}</b><br>`;
-    reportMsg += `Punti Totali Fatti: <b>${pointsAttacking}</b>/120<br><br>`;
+    if (!isSolitario) reportMsg += `Compagno: <b>${partner.name}</b><br>`;
+    else reportMsg += `<i>Il Chiamante ha giocato da solo!</i><br>`;
+    reportMsg += `Punti Fatti: <b>${pointsAttacking}</b>/120 ${isCappotto ? ' (CAPPOTTO! 🧥)' : ''}<br><br>`;
     
     if (win) reportMsg += `<span style='color:#00ff00; font-size:18px;'>🎉 I CHIAMANTI VINCONO! 🎉</span>`;
     else reportMsg += `<span style='color:#ff4444; font-size:18px;'>🛡️ I DIFENSORI VINCONO! 🛡️</span>`;
 
-    io.to(roomName).emit('statusMsg', reportMsg);
-    
-    setTimeout(() => {
-        if(rooms[roomName]) {
-            // Avanziamo il mazziere per la prossima partita
-            room.dealerIndex = (room.dealerIndex + 1) % 5;
-            
-            // Invece di avviare un nuovo round, resettiamo il tavolo e torniamo in lobby
-            resetGame(roomName);
-        }
-    }, 8000); // Aspetta 8 secondi per far leggere i risultati a schermo, poi torna in lobby
+    // LOGICA ROUND SUCCESSIVI
+    if (room.currentRound < room.maxRounds) {
+        room.currentRound++;
+        reportMsg += `<br><br>⏳ <i>Prossima partita tra 8 secondi...</i>`;
+        io.to(roomName).emit('statusMsg', reportMsg);
+        broadcastUpdate(roomName); // Aggiorna punteggi a schermo
+        
+        setTimeout(() => {
+            if(rooms[roomName]) {
+                room.dealerIndex = (room.dealerIndex + 1) % 5;
+                startRound(roomName);
+            }
+        }, 8000);
+    } else {
+        // FINE TORNEO ASSOLUTA
+        reportMsg += `<br><br>🏆 <b>TORNEO CONCLUSO!</b> 🏆<br><br><b>Classifica Finale:</b><br>`;
+        let sorted = [...room.players].sort((a,b) => b.tournamentScore - a.tournamentScore);
+        sorted.forEach((p, i) => {
+            reportMsg += `${i+1}. ${p.name}: <b>${p.tournamentScore} pt</b><br>`;
+        });
+        
+        io.to(roomName).emit('statusMsg', reportMsg);
+        broadcastUpdate(roomName);
+        
+        setTimeout(() => {
+            if(rooms[roomName]) {
+                room.dealerIndex = (room.dealerIndex + 1) % 5;
+                resetGame(roomName); // Torna in Lobby
+            }
+        }, 12000); // 12 secondi per godersi la classifica prima di uscire
+    }
 }
 
 function resetGame(roomName) { 

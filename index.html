@@ -198,10 +198,20 @@
             <div style="display:flex; align-items:center; justify-content:space-between; background:#222; padding:8px 12px; border-radius:5px; margin-top:10px; border: 1px solid #444;">
                 <span style="color:#ccc; font-weight:bold; font-size: 14px;">AGGIUNGI BOT 🤖</span>
                 <div style="display:flex; gap:10px;">
-                <button onclick="removeBot()" style="width:35px; height:35px; padding:0; background:#661111; color:white; border-radius:5px; border:1px solid #ff4444; font-size:20px;">-</button>
-                <button onclick="addBot()" style="width:35px; height:35px; padding:0; background:#116611; color:white; border-radius:5px; border:1px solid #44ff44; font-size:20px;">+</button>
+                    <button onclick="removeBot()" style="width:35px; height:35px; padding:0; background:#661111; color:white; border-radius:5px; border:1px solid #ff4444; font-size:20px;">-</button>
+                    <button onclick="addBot()" style="width:35px; height:35px; padding:0; background:#116611; color:white; border-radius:5px; border:1px solid #44ff44; font-size:20px;">+</button>
+                </div>
             </div>
-        </div>
+            
+            <div style="margin-top:15px; margin-bottom: 10px;">
+                <label style="color:#d4af37; font-size:12px; font-weight:bold;">MODALITÀ DI GIOCO:</label>
+                <select id="game-mode-select" style="padding: 8px; font-size: 14px; width: 100%; margin-top: 5px; background: #333; color: white; border: 1px solid #555; border-radius: 5px;">
+                    <option value="1">Partita Singola</option>
+                    <option value="5">Torneo (5 Partite)</option>
+                    <option value="10">Torneo (10 Partite)</option>
+                </select>
+            </div>
+
             <button onclick="start()" style="margin-top:15px;">INIZIA PARTITA</button>
         </div>
         <div id="waiting-msg" style="color:#888; font-size:12px; margin-top:10px;">In attesa dell'Host o di 5 giocatori...</div>
@@ -333,7 +343,10 @@
             document.getElementById('chat-sidebar').style.display='flex'; document.getElementById('room-title').innerText = "STANZA: " + roomName.toUpperCase();
         }
         
-        function start() { socket.emit('startGame'); }
+        function start() { 
+            const mode = document.getElementById('game-mode-select') ? document.getElementById('game-mode-select').value : 1;
+            socket.emit('startGame', { maxRounds: parseInt(mode) }); 
+        }
 
         function play(idx, c) {
             if(!isMyTurn) return;
@@ -521,7 +534,7 @@
                 div.setAttribute('data-playerid', p.id); 
                 
                 let infoBid = p.passedBidding ? "PASSATO" : (p.bid ? p.bid : "-");
-                let stats = `<div style="margin-top: 3px;"><span style="color:#ffff00">Asta: ${infoBid}</span><br>Punti: ${p.tricksWon}</div>`; 
+                let stats = `<div style="margin-top: 3px;"><span style="color:#ffff00">Asta: ${infoBid}</span><br>Prese: ${p.tricksWon}<br><span style="color:#00ff00">Torneo: ${p.tournamentScore || 0} pt</span></div>`; 
                 let dealerIcon = p.isDealer ? `<span style="color:gold; margin-left:5px;">🃏</span>` : "";
                 
                 let handCardsHTML = "";
