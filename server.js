@@ -3,12 +3,52 @@ const app = express();
 const http = require('http');
 const server = http.createServer(app);
 const { Server } = require("socket.io");
+const tf = require('@tensorflow/tfjs');
+const fs = require('fs');
+
+// --- CARICAMENTO DEL MODELLO IA MANUALE ---
+let botBrain = null;
+async function loadBotModel() {
+    try {
+        // Legge i file a mano
+        const modelJson = JSON.parse(fs.readFileSync('./bot_brain/model.json', 'utf8'));
+        const weightData = fs.readFileSync('./bot_brain/weights.bin');
+        const arrayBuffer = new Uint8Array(weightData).buffer; // Converte in modo sicuro per TFJS
+
+        // Carica direttamente in memoria
+        botBrain = await tf.loadLayersModel(tf.io.fromMemory(
+            modelJson.modelTopology,
+            modelJson.weightsManifest[0].weights,
+            arrayBuffer
+        ));
+        console.log("🤖 Cervello neurale dei Bot caricato con successo!");
+    } catch (error) {
+        console.log("⚠️ Modello non trovato o in addestramento. I bot giocheranno a caso nel frattempo.");
+    }
+}
+loadBotModel();
 
 const io = new Server(server, { pingTimeout: 60000, pingInterval: 25000, connectTimeout: 30000 });
 const path = require('path');
 const PORT = process.env.PORT || 3000;
 
-// NOTA: Rimossi TensorFlow e la rete neurale perché incompatibili con le regole della Briscola a 5
+// --- UTILITY PER LA RETE NEURALE ---
+const SUITS = ['denari', 'coppe', 'spade', 'bastoni'];
+
+function getCardIndex(card) {
+    if (!card) return -1;
+    return SUITS.indexOf(card.suit) * 10 + (card.value - 1);
+}
+
+function getStateVector(hand, tableCards, history, calledCard, is29) {
+    const vector = new Array(161).fill(0);
+    hand.forEach(c => vector[getCardIndex(c)] = 1);
+    tableCards.forEach(c => vector[40 + getCardIndex(c)] = 1);
+    history.forEach(c => vector[80 + getCardIndex(c)] = 1);
+    if (calledCard) vector[120 + getCardIndex(calledCard)] = 1;
+    if (is29) vector[160] = 1;
+    return vector;
+}
 
 app.use(express.static(__dirname));
 app.use('/carte', express.static(path.join(__dirname, 'carte')));
@@ -135,14 +175,19 @@ io.on('connection', (socket) => {
     socket.on('makeCall', (data) => {
         const roomName = socket.roomName; if (!roomName || !rooms[roomName]) return; const room = rooms[roomName];
         if(room.gameState !== "CALLING" || room.players[room.currentPlayerIndex].id !== socket.id) return;
+
+        // LOGICA DEL 29: Se chiama 29, la carta reale cercata è l'Asso (1)
+        let actualValue = data.value === 29 ? 1 : data.value;
+        let is29 = (data.value === 29); // Rileva se è stato chiamato il 29
         
         room.briscolaSuit = data.suit;
-        room.calledCard = { value: data.value, suit: data.suit };
+        room.calledCard = { value: actualValue, suit: data.suit };
+        room.is29 = is29; // Lo salva nella stanza per l'IA
         
         // Trova il compagno segreto
         room.partnerId = null;
         room.players.forEach(p => {
-            if (p.hand.find(c => c.value === data.value && c.suit === data.suit)) { room.partnerId = p.id; }
+            if (p.hand.find(c => c.value === actualValue && c.suit === data.suit)) { room.partnerId = p.id; }
         });
         
         io.to(roomName).emit('briscolaUpdate', { suit: data.suit, value: data.value });
@@ -191,27 +236,102 @@ function handleBotTurn(roomName) {
             broadcastUpdate(roomName); nextTurnBidding(roomName);
 
         } else if (room.gameState === "CALLING") {
-            // Se il bot vince l'asta, chiama un seme e una carta a caso (spesso il 3 per non tirarsi la zappa sui piedi)
-            const suits = ['denari', 'coppe', 'spade', 'bastoni'];
-            const calledSuit = suits[Math.floor(Math.random()*suits.length)];
-            room.briscolaSuit = calledSuit; room.calledCard = { value: 3, suit: calledSuit };
             
-            room.players.forEach(pl => { if (pl.hand.find(c => c.value === 3 && c.suit === calledSuit)) { room.partnerId = pl.id; }});
+            // 1. EURISTICA: Trova il seme migliore e conta le carte
+            let suitCounts = { 'denari': 0, 'coppe': 0, 'spade': 0, 'bastoni': 0 };
+            p.hand.forEach(c => suitCounts[c.suit]++);
+
+            let bestSuit = 'denari'; let maxCount = -1;
+            for (let suit in suitCounts) {
+                if (suitCounts[suit] > maxCount) { maxCount = suitCounts[suit]; bestSuit = suit; }
+            }
+
+            let has1 = p.hand.some(c => c.suit === bestSuit && c.value === 1);
+            let has3 = p.hand.some(c => c.suit === bestSuit && c.value === 3);
+            let has10 = p.hand.some(c => c.suit === bestSuit && c.value === 10);
+            let has9 = p.hand.some(c => c.suit === bestSuit && c.value === 9);
+            let has8 = p.hand.some(c => c.suit === bestSuit && c.value === 8);
+
+            let calledValue = 1; 
+            let is29 = false;
+
+            // Logica della chiamata (incluso il 29)
+            if (!has1 && !has3 && has10 && has9 && has8) {
+                calledValue = 29;
+                is29 = true;
+            } else if (!has1) { calledValue = 1; }
+            else if (!has3) { calledValue = 3; }
+            else if (!has10) { calledValue = 10; }
+            else { calledValue = 9; }
+
+            // 2. APPLICA LA CHIAMATA AL SERVER
+            let actualValue = calledValue === 29 ? 1 : calledValue;
+            room.briscolaSuit = bestSuit;
+            room.calledCard = { value: actualValue, suit: bestSuit };
+            room.is29 = is29; // Salviamo questa informazione per passarla alla rete neurale dopo
             
-            io.to(roomName).emit('briscolaUpdate', { suit: calledSuit, value: 3 });
+            room.partnerId = null;
+            room.players.forEach(pl => {
+                if (pl.hand.find(c => c.value === actualValue && c.suit === bestSuit)) { room.partnerId = pl.id; }
+            });
+
+            // Mostra a schermo la chiamata
+            io.to(roomName).emit('briscolaUpdate', { suit: bestSuit, value: calledValue });
             
             room.gameState = "PLAYING";
-            room.firstPlayerIndex = (room.dealerIndex + 1) % 5; room.currentPlayerIndex = room.firstPlayerIndex;
+            room.firstPlayerIndex = room.players.findIndex(pl => pl.id === p.id);
+            room.currentPlayerIndex = room.firstPlayerIndex;
+            
             broadcastUpdate(roomName); updateGameState(roomName);
 
         } else if (room.gameState === "PLAYING") {
-            // Logica Bot Base per giocare: Gioca una carta a caso
-            if (p.hand.length === 0) return;
-            let chosenIdx = Math.floor(Math.random() * p.hand.length);
-            const c = p.hand.splice(chosenIdx, 1)[0];
-            room.tableCards.push({ playerId: p.id, card: c, playerName: p.name });
-            io.to(roomName).emit('tableUpdate', room.tableCards);
-            nextTurnPlaying(roomName);
+            
+            // 3. RETE NEURALE: Decide la carta da giocare
+            let chosenCardIndex = 0;
+
+            if (botBrain) {
+                // USA LE VARIABILI CORRETTE DEL SERVER
+                let currentTable = room.tableCards ? room.tableCards.map(tc => tc.card) : [];
+                let history = room.history || [];
+                let is29 = room.is29 || false;
+
+                // Genera la "Vista" e interroga il cervello
+                let state = getStateVector(p.hand, currentTable, history, room.calledCard, is29);
+                
+                let qValues = tf.tidy(() => {
+                    const stateTensor = tf.tensor2d([state]);
+                    return botBrain.predict(stateTensor).dataSync();
+                });
+
+                // Cerca la carta fisicamente in mano con il voto più alto
+                let maxQ = -Infinity;
+                p.hand.forEach((card, idx) => {
+                    let globalIdx = getCardIndex(card);
+                    if (qValues[globalIdx] > maxQ) {
+                        maxQ = qValues[globalIdx];
+                        chosenCardIndex = idx;
+                    }
+                });
+            } else {
+                chosenCardIndex = Math.floor(Math.random() * p.hand.length);
+            }
+
+            // Gioca la carta scelta
+            const playedCard = p.hand.splice(chosenCardIndex, 1)[0];
+            
+            // AGGIORNATO AL METODO CORRETTO
+            room.tableCards.push({ playerId: p.id, card: playedCard, playerName: p.name }); 
+            io.to(roomName).emit('tableUpdate', room.tableCards); 
+            
+            room.currentPlayerIndex = (room.currentPlayerIndex + 1) % 5;
+            broadcastUpdate(roomName);
+            
+            // CONTROLLO CORRETTO DI FINE PASSATA
+            if (room.tableCards.length === 5) {
+                evaluateTrick(roomName);
+            } else {
+                updateGameState(roomName);
+            }
         }
     }, 1500);
 }
@@ -241,6 +361,8 @@ function startRound(roomName) {
   room.deck = shuffle(createDeck()); room.tableCards = []; room.isProcessing = false;
   room.gameState = "BIDDING"; room.currentMaxBid = 60; room.highestBidderId = null;
   room.briscolaSuit = null; room.calledCard = null; room.partnerId = null;
+  room.history = []; 
+  room.is29 = false;
   io.to(roomName).emit('briscolaUpdate', {suit: null, value: null});
 
   room.players.forEach(p => { 
@@ -314,12 +436,17 @@ function evaluateTrick(roomName) {
         if(!rooms[roomName]) return;
         const r = rooms[roomName]; 
         broadcastUpdate(roomName);
+        
+        // --- SALVA LE CARTE NELLA MEMORIA PRIMA DI PULIRE IL TAVOLO ---
+        r.tableCards.forEach(tc => r.history.push(tc.card));
+        // --------------------------------------------------------------
+
         r.tableCards = []; io.to(roomName).emit('tableUpdate', []); 
         r.currentPlayerIndex = r.players.findIndex(p => p.id === winner.playerId);
         
         if (r.players[0].hand.length === 0) endRoundLogic(roomName); 
         else { r.isProcessing = false; updateGameState(roomName); }
-    }, 3500); 
+    }, 3500);
 }
 
 function endRoundLogic(roomName) {
