@@ -466,75 +466,95 @@ function endRoundLogic(roomName) {
     let pointsAttacking = caller.tricksWon + (partner && partner.id !== caller.id ? partner.tricksWon : 0);
     let win = pointsAttacking >= room.currentMaxBid;
     let isCappotto = (pointsAttacking === 120 || pointsAttacking === 0);
-    
-    // --- CALCOLO PUNTEGGI TORNEO ---
-    let bid = room.currentMaxBid;
-    let ptsChiamante = 2, ptsCompagno = 1, ptsAvversari = 1;
-
-    if (bid >= 60 && bid <= 79) { ptsChiamante = 2; ptsCompagno = 1; ptsAvversari = 1; }
-    else if (bid >= 80 && bid <= 89) { ptsChiamante = 4; ptsCompagno = 2; ptsAvversari = 2; }
-    else if (bid >= 90 && bid <= 99) { ptsChiamante = 6; ptsCompagno = 3; ptsAvversari = 3; }
-    else if (bid >= 100 && bid <= 109) { ptsChiamante = 8; ptsCompagno = 4; ptsAvversari = 4; }
-    else if (bid >= 110 && bid <= 120) { ptsChiamante = 12; ptsCompagno = 6; ptsAvversari = 6; }
-
-    if (isCappotto) { ptsChiamante *= 2; ptsCompagno *= 2; ptsAvversari *= 2; }
-
-    // Gestione della "Chiamata a sé stesso" (Gioca da solo vs 4)
     let isSolitario = (!partner || partner.id === caller.id);
-
-    room.players.forEach(p => {
-        if (p.id === caller.id) {
-            // Se gioca da solo, assorbe anche i punti del compagno mancante
-            let pts = isSolitario ? (ptsChiamante + ptsCompagno) : ptsChiamante;
-            p.tournamentScore += win ? pts : -pts;
-        } else if (!isSolitario && partner && p.id === partner.id) {
-            p.tournamentScore += win ? ptsCompagno : -ptsCompagno;
-        } else {
-            // Avversari
-            p.tournamentScore += win ? -ptsAvversari : ptsAvversari;
-        }
-    });
-    // --------------------------------
-
-    let reportMsg = `📊 <b>FINE ROUND ${room.currentRound} / ${room.maxRounds}</b> 📊<br><br>`;
-    reportMsg += `Chiamante: <b>${caller.name}</b> (Obiettivo: ${room.currentMaxBid})<br>`;
-    if (!isSolitario) reportMsg += `Compagno: <b>${partner.name}</b><br>`;
-    else reportMsg += `<i>Il Chiamante ha giocato da solo!</i><br>`;
-    reportMsg += `Punti Fatti: <b>${pointsAttacking}</b>/120 ${isCappotto ? ' (CAPPOTTO! 🧥)' : ''}<br><br>`;
     
-    if (win) reportMsg += `<span style='color:#00ff00; font-size:18px;'>🎉 I CHIAMANTI VINCONO! 🎉</span>`;
-    else reportMsg += `<span style='color:#ff4444; font-size:18px;'>🛡️ I DIFENSORI VINCONO! 🛡️</span>`;
-
-    // LOGICA ROUND SUCCESSIVI
-    if (room.currentRound < room.maxRounds) {
-        room.currentRound++;
-        reportMsg += `<br><br>⏳ <i>Prossima partita tra 8 secondi...</i>`;
-        io.to(roomName).emit('statusMsg', reportMsg);
-        broadcastUpdate(roomName); // Aggiorna punteggi a schermo
+    // --- STRADA 1: PARTITA SINGOLA ---
+    if (room.maxRounds === 1) {
+        let reportMsg = `📊 <b>FINE PARTITA</b> 📊<br><br>`;
+        reportMsg += `Chiamante: <b>${caller.name}</b> (Obiettivo: ${room.currentMaxBid})<br>`;
+        if (!isSolitario) reportMsg += `Compagno: <b>${partner.name}</b><br>`;
+        else reportMsg += `<i>Il Chiamante ha giocato da solo!</i><br>`;
+        reportMsg += `Punti Fatti: <b>${pointsAttacking}</b>/120 ${isCappotto ? ' (CAPPOTTO! 🧥)' : ''}<br><br>`;
         
+        if (win) reportMsg += `<span style='color:#00ff00; font-size:18px;'>🎉 I CHIAMANTI VINCONO! 🎉</span>`;
+        else reportMsg += `<span style='color:#ff4444; font-size:18px;'>🛡️ I DIFENSORI VINCONO! 🛡️</span>`;
+
+        io.to(roomName).emit('statusMsg', reportMsg);
+        
+        // Aspetta 8 secondi e torna in Lobby
         setTimeout(() => {
             if(rooms[roomName]) {
                 room.dealerIndex = (room.dealerIndex + 1) % 5;
-                startRound(roomName);
+                resetGame(roomName); 
             }
         }, 8000);
+
+    // --- STRADA 2: TORNEO A PUNTI ---
     } else {
-        // FINE TORNEO ASSOLUTA
-        reportMsg += `<br><br>🏆 <b>TORNEO CONCLUSO!</b> 🏆<br><br><b>Classifica Finale:</b><br>`;
-        let sorted = [...room.players].sort((a,b) => b.tournamentScore - a.tournamentScore);
-        sorted.forEach((p, i) => {
-            reportMsg += `${i+1}. ${p.name}: <b>${p.tournamentScore} pt</b><br>`;
-        });
-        
-        io.to(roomName).emit('statusMsg', reportMsg);
-        broadcastUpdate(roomName);
-        
-        setTimeout(() => {
-            if(rooms[roomName]) {
-                room.dealerIndex = (room.dealerIndex + 1) % 5;
-                resetGame(roomName); // Torna in Lobby
+        // Calcolo punteggi
+        let bid = room.currentMaxBid;
+        let ptsChiamante = 2, ptsCompagno = 1, ptsAvversari = 1;
+
+        if (bid >= 60 && bid <= 79) { ptsChiamante = 2; ptsCompagno = 1; ptsAvversari = 1; }
+        else if (bid >= 80 && bid <= 89) { ptsChiamante = 4; ptsCompagno = 2; ptsAvversari = 2; }
+        else if (bid >= 90 && bid <= 99) { ptsChiamante = 6; ptsCompagno = 3; ptsAvversari = 3; }
+        else if (bid >= 100 && bid <= 109) { ptsChiamante = 8; ptsCompagno = 4; ptsAvversari = 4; }
+        else if (bid >= 110 && bid <= 120) { ptsChiamante = 12; ptsCompagno = 6; ptsAvversari = 6; }
+
+        if (isCappotto) { ptsChiamante *= 2; ptsCompagno *= 2; ptsAvversari *= 2; }
+
+        room.players.forEach(p => {
+            if (p.id === caller.id) {
+                let pts = isSolitario ? (ptsChiamante + ptsCompagno) : ptsChiamante;
+                p.tournamentScore += win ? pts : -pts;
+            } else if (!isSolitario && partner && p.id === partner.id) {
+                p.tournamentScore += win ? ptsCompagno : -ptsCompagno;
+            } else {
+                p.tournamentScore += win ? -ptsAvversari : ptsAvversari;
             }
-        }, 12000); // 12 secondi per godersi la classifica prima di uscire
+        });
+
+        let reportMsg = `📊 <b>FINE ROUND ${room.currentRound} / ${room.maxRounds}</b> 📊<br><br>`;
+        reportMsg += `Chiamante: <b>${caller.name}</b> (Obiettivo: ${room.currentMaxBid})<br>`;
+        if (!isSolitario) reportMsg += `Compagno: <b>${partner.name}</b><br>`;
+        else reportMsg += `<i>Il Chiamante ha giocato da solo!</i><br>`;
+        reportMsg += `Punti Fatti: <b>${pointsAttacking}</b>/120 ${isCappotto ? ' (CAPPOTTO! 🧥)' : ''}<br><br>`;
+        
+        if (win) reportMsg += `<span style='color:#00ff00; font-size:18px;'>🎉 I CHIAMANTI VINCONO! 🎉</span>`;
+        else reportMsg += `<span style='color:#ff4444; font-size:18px;'>🛡️ I DIFENSORI VINCONO! 🛡️</span>`;
+
+        // Logica Turni Torneo
+        if (room.currentRound < room.maxRounds) {
+            room.currentRound++;
+            reportMsg += `<br><br>⏳ <i>Prossima partita tra 8 secondi...</i>`;
+            io.to(roomName).emit('statusMsg', reportMsg);
+            broadcastUpdate(roomName); 
+            
+            // Nuova Partita
+            setTimeout(() => {
+                if(rooms[roomName]) {
+                    room.dealerIndex = (room.dealerIndex + 1) % 5;
+                    startRound(roomName);
+                }
+            }, 8000);
+        } else {
+            reportMsg += `<br><br>🏆 <b>TORNEO CONCLUSO!</b> 🏆<br><br><b>Classifica Finale:</b><br>`;
+            let sorted = [...room.players].sort((a,b) => b.tournamentScore - a.tournamentScore);
+            sorted.forEach((p, i) => {
+                reportMsg += `${i+1}. ${p.name}: <b>${p.tournamentScore} pt</b><br>`;
+            });
+            
+            io.to(roomName).emit('statusMsg', reportMsg);
+            broadcastUpdate(roomName);
+            
+            // Ritorno in Lobby post Torneo
+            setTimeout(() => {
+                if(rooms[roomName]) {
+                    room.dealerIndex = (room.dealerIndex + 1) % 5;
+                    resetGame(roomName); 
+                }
+            }, 12000); 
+        }
     }
 }
 
