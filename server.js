@@ -59,7 +59,6 @@ app.get('/', (req, res) => { res.sendFile(__dirname + '/index.html'); });
 console.log("SERVER AVVIATO: Briscola a 5 (A Chiamata)");
 
 const rooms = {}; 
-const SUITS = ['denari', 'coppe', 'spade', 'bastoni'];
 const BRISCOLA_POINTS = { 1: 11, 3: 10, 10: 4, 9: 3, 8: 2, 7: 0, 6: 0, 5: 0, 4: 0, 2: 0 };
 const BRISCOLA_HIERARCHY = { 1: 100, 3: 90, 10: 80, 9: 70, 8: 60, 7: 50, 6: 40, 5: 30, 4: 20, 2: 10 };
 
