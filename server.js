@@ -340,8 +340,7 @@ function handleBotTurn(roomName) {
             }
 
             // Passa il turno dell'asta
-            room.currentPlayerIndex = (room.currentPlayerIndex + 1) % 5;
-            checkBiddingEnd(roomName); 
+            nextTurnBidding(roomName); 
 
         } else if (room.gameState === "CALLING") {
             let chosenSuit;
@@ -407,7 +406,28 @@ function handleBotTurn(roomName) {
             p.plannedCall = null; 
             
             // Invia la decisione al motore di gioco
-            handleCall(roomName, p.id, chosenSuit, chosenValue, is29);
+           // --- ESECUZIONE UFFICIALE DELLA CHIAMATA ---
+            room.briscolaSuit = chosenSuit;
+            room.calledCard = { value: chosenValue, suit: chosenSuit };
+            room.is29 = is29;
+            
+            // Trova il compagno segreto
+            room.partnerId = null;
+            room.players.forEach(pl => {
+                if (pl.hand.find(c => c.value === chosenValue && c.suit === chosenSuit)) { 
+                    room.partnerId = pl.id; 
+                }
+            });
+            
+            io.to(roomName).emit('briscolaUpdate', { suit: chosenSuit, value: chosenValue });
+            
+            // Passa alla fase di gioco (inizia chi ha chiamato)
+            room.gameState = "PLAYING";
+            room.firstPlayerIndex = room.players.findIndex(pl => pl.id === p.id);
+            room.currentPlayerIndex = room.firstPlayerIndex;
+            
+            broadcastUpdate(roomName); 
+            updateGameState(roomName);
 
         } else if (room.gameState === "PLAYING") {
             
