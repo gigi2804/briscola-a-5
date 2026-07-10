@@ -68,6 +68,7 @@ const PORT = process.env.PORT || 3000;
 
 // --- UTILITY PER LA RETE NEURALE ---
 const SUITS = ['denari', 'coppe', 'spade', 'bastoni'];
+const VALUES = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
 
 function getCardIndex(card) {
     if (!card) return -1;
