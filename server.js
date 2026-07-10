@@ -340,6 +340,7 @@ function handleBotTurn(roomName) {
                 io.to(roomName).emit('statusMsg', `🤖 <b>${p.name}</b> passa.`);
             }
 
+            broadcastUpdate(roomName);
             // Passa il turno dell'asta
             nextTurnBidding(roomName); 
 
