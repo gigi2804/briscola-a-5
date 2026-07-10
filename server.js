@@ -8,22 +8,56 @@ const fs = require('fs');
 
 // --- CARICAMENTO DEL MODELLO IA MANUALE ---
 let botBrain = null;
+let bidBrain = null;
+
+// Aggiungi la funzione utility per l'Asta
+function getHandVector(hand) {
+    const vector = new Array(40).fill(0);
+    hand.forEach(c => vector[getCardIndex(c)] = 1);
+    return vector;
+}
+
 async function loadBotModel() {
+    // 1. CARICAMENTO CERVELLO DI GIOCO (botBrain)
     try {
-        // Legge i file a mano
         const modelJson = JSON.parse(fs.readFileSync('./bot_brain/model.json', 'utf8'));
         const weightData = fs.readFileSync('./bot_brain/weights.bin');
-        const arrayBuffer = new Uint8Array(weightData).buffer; // Converte in modo sicuro per TFJS
+        const arrayBuffer = new Uint8Array(weightData).buffer;
 
-        // Carica direttamente in memoria
-        botBrain = await tf.loadLayersModel(tf.io.fromMemory(
-            modelJson.modelTopology,
-            modelJson.weightsManifest[0].weights,
-            arrayBuffer
-        ));
+        const botArtifacts = {
+            modelTopology: modelJson.modelTopology,
+            weightSpecs: modelJson.weightsManifest[0].weights,
+            weightData: arrayBuffer,
+            format: modelJson.format,
+            generatedBy: modelJson.generatedBy,
+            convertedBy: modelJson.convertedBy
+        };
+
+        botBrain = await tf.loadLayersModel(tf.io.fromMemory(botArtifacts));
         console.log("🤖 Cervello neurale dei Bot caricato con successo!");
     } catch (error) {
-        console.log("⚠️ Modello non trovato o in addestramento. I bot giocheranno a caso nel frattempo.");
+        console.log("⚠️ Modello Gioco non trovato. I bot giocheranno a caso nel frattempo.");
+    }
+
+    // 2. CARICAMENTO CERVELLO DELL'ASTA (bidBrain)
+    try {
+        const bidJSON = JSON.parse(fs.readFileSync('./bid_brain/model.json', 'utf8'));
+        const bidWeights = fs.readFileSync('./bid_brain/weights.bin');
+        const bidWeightData = new Uint8Array(bidWeights).buffer;
+        
+        const bidArtifacts = {
+            modelTopology: bidJSON.modelTopology,
+            weightSpecs: bidJSON.weightsManifest[0].weights,
+            weightData: bidWeightData,
+            format: bidJSON.format,
+            generatedBy: bidJSON.generatedBy,
+            convertedBy: bidJSON.convertedBy
+        };
+
+        bidBrain = await tf.loadLayersModel(tf.io.fromMemory(bidArtifacts));
+        console.log("🎩 Cervello dell'Asta (bidBrain) caricato con successo!");
+    } catch (err) {
+        console.log("⚠️ Nessun bidBrain trovato, i bot faranno aste base.");
     }
 }
 loadBotModel();
@@ -40,13 +74,25 @@ function getCardIndex(card) {
     return SUITS.indexOf(card.suit) * 10 + (card.value - 1);
 }
 
-function getStateVector(hand, tableCards, history, calledCard, is29) {
-    const vector = new Array(161).fill(0);
+function getStateVector(hand, tableCards, history, calledCard, is29, amICaller, amIPartner, isCallerWinningTrick, pointsOnTable, currentBid, callerPoints, myPoints) {
+    const vector = new Array(168).fill(0); 
     hand.forEach(c => vector[getCardIndex(c)] = 1);
     tableCards.forEach(c => vector[40 + getCardIndex(c)] = 1);
     history.forEach(c => vector[80 + getCardIndex(c)] = 1);
     if (calledCard) vector[120 + getCardIndex(calledCard)] = 1;
     if (is29) vector[160] = 1;
+    
+    // SENSI DI SQUADRA (Senza rivelare il compagno)
+    vector[161] = amICaller ? 1 : 0;
+    vector[162] = amIPartner ? 1 : 0; // Il bot sa se LUI STESSO è il compagno, ed è giusto
+    vector[163] = isCallerWinningTrick ? 1 : 0;
+    vector[164] = pointsOnTable / 120; 
+    
+    // NUOVI SENSI DI PUNTEGGIO (Pubblici)
+    vector[165] = currentBid / 120; // Obiettivo dell'asta
+    vector[166] = callerPoints / 120; // Punti in cassaforte del Chiamante (pubblico)
+    vector[167] = myPoints / 120; // Punti in cassaforte miei
+    
     return vector;
 }
 
@@ -235,63 +281,133 @@ function handleBotTurn(roomName) {
         room.isProcessing = false;
 
         if (room.gameState === "BIDDING") {
-            // Bot logica asta: passa quasi sempre per non rovinare il gioco agli umani, oppure fa un piccolo rilancio iniziale
-            if (room.currentMaxBid < 65 && Math.random() > 0.5) {
-                let val = room.currentMaxBid + 1;
-                room.currentMaxBid = val; room.highestBidderId = p.id; p.bid = val;
+            let currentBid = room.currentMaxBid || 60; 
+            let maxPotential = 61; 
+            let plannedCall = null;
+
+            if (bidBrain) {
+                let handState = getHandVector(p.hand);
+                
+                // Il bot "pensa"
+                tf.tidy(() => {
+                    let preds = bidBrain.predict(tf.tensor2d([handState])).dataSync();
+                    let maxPts = -1; let bestIndex = 0;
+                    
+                    for (let i = 0; i < 40; i++) {
+                        if (preds[i] > maxPts) { maxPts = preds[i]; bestIndex = i; }
+                    }
+                    
+                    // Converte la percentuale (0-1) in punti reali (0-120)
+                    // Sottrae 2 punti come "margine di sicurezza" per non scommettere tutto
+                    maxPotential = Math.floor(maxPts * 120) - 2; 
+                    
+                    // Salva la mossa geniale da fare se vince l'asta
+                    let calledSuit = SUITS[Math.floor(bestIndex / 10)];
+                    let calledValue = VALUES[bestIndex % 10];
+                    plannedCall = { suit: calledSuit, value: calledValue };
+                });
             } else {
-                p.passedBidding = true;
+                // Se stai ancora addestrando, tira a caso
+                maxPotential = 61 + Math.floor(Math.random() * 10);
             }
-            broadcastUpdate(roomName); nextTurnBidding(roomName);
+
+            // --- LA LOGICA "GAMBLER" (70 -> +2 -> +1) ---
+            let nextBid = 0; // 0 significa ritirarsi (Passo)
+
+            if (maxPotential > currentBid) {
+                if (currentBid < 70 && maxPotential >= 70) {
+                    nextBid = 70; // Salto aggressivo per spaventare
+                } else if (maxPotential - currentBid >= 3) {
+                    nextBid = currentBid + 2; // Rilancio morbido
+                } else {
+                    nextBid = currentBid + 1; // Rilancio al limite, braccino corto
+                }
+            }
+
+            // --- ESECUZIONE DELLA SCELTA ---
+            if (nextBid > 0 && nextBid <= 120) {
+                // Il bot rilancia!
+                room.currentMaxBid = nextBid;
+                room.highestBidderId = p.id;
+                p.bid = nextBid;
+                if (plannedCall) p.plannedCall = plannedCall; // Memorizza chi vuole chiamare
+                
+                io.to(roomName).emit('statusMsg', `🤖 <b>${p.name}</b> chiama <b>${nextBid}</b>!`);
+            } else {
+                // Il bot si ritira
+                p.passedBidding = true;
+                io.to(roomName).emit('statusMsg', `🤖 <b>${p.name}</b> passa.`);
+            }
+
+            // Passa il turno dell'asta
+            room.currentPlayerIndex = (room.currentPlayerIndex + 1) % 5;
+            checkBiddingEnd(roomName); 
 
         } else if (room.gameState === "CALLING") {
-            
-            // 1. EURISTICA: Trova il seme migliore e conta le carte
-            let suitCounts = { 'denari': 0, 'coppe': 0, 'spade': 0, 'bastoni': 0 };
-            p.hand.forEach(c => suitCounts[c.suit]++);
-
-            let bestSuit = 'denari'; let maxCount = -1;
-            for (let suit in suitCounts) {
-                if (suitCounts[suit] > maxCount) { maxCount = suitCounts[suit]; bestSuit = suit; }
-            }
-
-            let has1 = p.hand.some(c => c.suit === bestSuit && c.value === 1);
-            let has3 = p.hand.some(c => c.suit === bestSuit && c.value === 3);
-            let has10 = p.hand.some(c => c.suit === bestSuit && c.value === 10);
-            let has9 = p.hand.some(c => c.suit === bestSuit && c.value === 9);
-            let has8 = p.hand.some(c => c.suit === bestSuit && c.value === 8);
-
-            let calledValue = 1; 
+            let chosenSuit;
+            let chosenValue;
             let is29 = false;
 
-            // Logica della chiamata (incluso il 29)
-            if (!has1 && !has3 && has10 && has9 && has8) {
-                calledValue = 29;
-                is29 = true;
-            } else if (!has1) { calledValue = 1; }
-            else if (!has3) { calledValue = 3; }
-            else if (!has10) { calledValue = 10; }
-            else { calledValue = 9; }
+            // --- PIANO A: L'INTELLIGENZA ARTIFICIALE ---
+            // Se il bot ha scommesso usando la Rete Neurale, sa già esattamente cosa voleva chiamare
+            if (p.plannedCall) {
+                chosenSuit = p.plannedCall.suit;
+                chosenValue = p.plannedCall.value;
+                
+                // Controlla comunque se la chiamata scelta dall'IA rientra nella famosa regola del "29"
+                let has1 = p.hand.some(c => c.suit === chosenSuit && c.value === 1);
+                let has3 = p.hand.some(c => c.suit === chosenSuit && c.value === 3);
+                let has10 = p.hand.some(c => c.suit === chosenSuit && c.value === 10);
+                let has9 = p.hand.some(c => c.suit === chosenSuit && c.value === 9);
+                let has8 = p.hand.some(c => c.suit === chosenSuit && c.value === 8);
+                
+                if (!has1 && !has3 && has10 && has9 && has8 && chosenValue === 1) {
+                    is29 = true;
+                }
 
-            // 2. APPLICA LA CHIAMATA AL SERVER
-            let actualValue = calledValue === 29 ? 1 : calledValue;
-            room.briscolaSuit = bestSuit;
-            room.calledCard = { value: actualValue, suit: bestSuit };
-            room.is29 = is29; // Salviamo questa informazione per passarla alla rete neurale dopo
-            
-            room.partnerId = null;
-            room.players.forEach(pl => {
-                if (pl.hand.find(c => c.value === actualValue && c.suit === bestSuit)) { room.partnerId = pl.id; }
-            });
+            // --- PIANO B: VECCHIA EURISTICA MATEMATICA ---
+            // Se la Rete Neurale è spenta o in addestramento, usa la vecchia logica infallibile
+            } else {
+                let suitCounts = { 'denari': 0, 'coppe': 0, 'spade': 0, 'bastoni': 0 };
+                p.hand.forEach(c => suitCounts[c.suit]++);
 
-            // Mostra a schermo la chiamata
-            io.to(roomName).emit('briscolaUpdate', { suit: bestSuit, value: calledValue });
+                // Trova il seme più numeroso
+                let maxCount = -1;
+                for (let suit in suitCounts) {
+                    if (suitCounts[suit] > maxCount) { 
+                        maxCount = suitCounts[suit]; 
+                        chosenSuit = suit; 
+                    }
+                }
+
+                // Trova i carichi mancanti in quel seme
+                let has1 = p.hand.some(c => c.suit === chosenSuit && c.value === 1);
+                let has3 = p.hand.some(c => c.suit === chosenSuit && c.value === 3);
+                let has10 = p.hand.some(c => c.suit === chosenSuit && c.value === 10);
+                let has9 = p.hand.some(c => c.suit === chosenSuit && c.value === 9);
+                let has8 = p.hand.some(c => c.suit === chosenSuit && c.value === 8);
+
+                // Applica la gerarchia
+                if (!has1 && !has3 && has10 && has9 && has8) {
+                    chosenValue = 1;  
+                    is29 = true;      
+                } else if (!has1) {
+                    chosenValue = 1;
+                } else if (!has3) {
+                    chosenValue = 3;
+                } else if (!has10) {
+                    chosenValue = 10;
+                } else {
+                    chosenValue = 9;
+                }
+            }
+
+            // --- ESECUZIONE UFFICIALE ---
+            // Pulisce la memoria del bot per le prossime mani
+            p.plannedCall = null; 
             
-            room.gameState = "PLAYING";
-            room.firstPlayerIndex = room.players.findIndex(pl => pl.id === p.id);
-            room.currentPlayerIndex = room.firstPlayerIndex;
-            
-            broadcastUpdate(roomName); updateGameState(roomName);
+            // Invia la decisione al motore di gioco
+            handleCall(roomName, p.id, chosenSuit, chosenValue, is29);
 
         } else if (room.gameState === "PLAYING") {
             
@@ -299,13 +415,43 @@ function handleBotTurn(roomName) {
             let chosenCardIndex = 0;
 
             if (botBrain) {
-                // USA LE VARIABILI CORRETTE DEL SERVER
+               // Recupera le info del tavolo
                 let currentTable = room.tableCards ? room.tableCards.map(tc => tc.card) : [];
                 let history = room.history || [];
                 let is29 = room.is29 || false;
 
+                // --- CALCOLO VARIABILI E PUNTEGGI ONESTI ---
+                let amICaller = (p.id === room.highestBidderId);
+                let amIPartner = (p.id === room.partnerId);
+                
+                let caller = room.players.find(pl => pl.id === room.highestBidderId);
+                let callerPoints = caller ? caller.tricksWon : 0;
+                let myPoints = p.tricksWon;
+                let currentBid = room.currentMaxBid || 60;
+                
+                let isCallerWinningTrick = false;
+                let pointsOnTable = 0;
+                
+                if (room.tableCards.length > 0) {
+                    let leadingSuit = room.tableCards[0].card.suit;
+                    let winnerCard = room.tableCards[0];
+                    let maxP = getCardPowerBriscola(winnerCard.card, leadingSuit, room.briscolaSuit);
+                    pointsOnTable += BRISCOLA_POINTS[winnerCard.card.value] || 0;
+
+                    for (let i = 1; i < room.tableCards.length; i++) {
+                        let tc = room.tableCards[i];
+                        pointsOnTable += BRISCOLA_POINTS[tc.card.value] || 0;
+                        let pwr = getCardPowerBriscola(tc.card, leadingSuit, room.briscolaSuit);
+                        if (pwr > maxP) { maxP = pwr; winnerCard = tc; }
+                    }
+                    if (winnerCard.playerId === room.highestBidderId) {
+                        isCallerWinningTrick = true;
+                    }
+                }
+                // -----------------------------------------------
+
                 // Genera la "Vista" e interroga il cervello
-                let state = getStateVector(p.hand, currentTable, history, room.calledCard, is29);
+                let state = getStateVector(p.hand, currentTable, history, room.calledCard, is29, amICaller, amIPartner, isCallerWinningTrick, pointsOnTable, currentBid, callerPoints, myPoints);
                 
                 let qValues = tf.tidy(() => {
                     const stateTensor = tf.tensor2d([state]);
