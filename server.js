@@ -289,23 +289,60 @@ function handleBotTurn(roomName) {
             if (bidBrain) {
                 let handState = getHandVector(p.hand);
                 
-                // Il bot "pensa"
                 tf.tidy(() => {
                     let preds = bidBrain.predict(tf.tensor2d([handState])).dataSync();
-                    let maxPts = -1; let bestIndex = 0;
                     
-                    for (let i = 0; i < 40; i++) {
-                        if (preds[i] > maxPts) { maxPts = preds[i]; bestIndex = i; }
+                    // --- 1. IL FILTRO FERREO (Action Masking) con GERARCHIA COMPLETA ---
+                    let validCalls = [];
+                    // L'ordine di forza esatto della Briscola
+                    const GERARCHIA = [1, 3, 10, 9, 8, 7, 6, 5, 4, 2];
+                    
+                    SUITS.forEach(suit => {
+                        // Regola 1: Deve avere ALMENO una carta di questo seme
+                        if (p.hand.some(c => c.suit === suit)) {
+                            
+                            let missingValue = null;
+                            
+                            // Regola 2: Trova la prima carta mancante partendo dalla più forte
+                            for (let val of GERARCHIA) {
+                                if (!p.hand.some(c => c.suit === suit && c.value === val)) {
+                                    missingValue = val;
+                                    break; // Trovata la più alta mancante! Ferma il ciclo per questo seme
+                                }
+                            }
+
+                            if (missingValue !== null) {
+                                validCalls.push({ suit: suit, value: missingValue });
+                            }
+                        }
+                    });
+
+                    // --- 2. L'IA VALUTA SOLO LE CHIAMATE LOGICHE ---
+                    let maxPts = -Infinity;
+                    
+                    validCalls.forEach(call => {
+                        // Calcola l'indice esatto della Rete Neurale per questa carta
+                        let i = SUITS.indexOf(call.suit) * 10 + (call.value - 1);
+                        
+                        if (preds[i] > maxPts) {
+                            maxPts = preds[i];
+                            plannedCall = { suit: call.suit, value: call.value };
+                        }
+                    });
+
+                    // --- 3. LIMITATORE DI ARROGANZA (Scommesse estreme) ---
+                    if (!plannedCall) {
+                        maxPotential = 61; // Failsafe estremo
+                    } else {
+                        // Applica un malus di 20 punti per non sfidare troppo la fortuna contro gli umani
+                        maxPotential = Math.floor(maxPts * 120) - 20; 
+                        
+                        // Check di realtà: se non ha nemmeno un Asso in mano, NON PUÒ superare gli 80 punti di scommessa
+                        let hasAnyAce = p.hand.some(c => c.value === 1);
+                        if (!hasAnyAce && maxPotential > 80) {
+                            maxPotential = 75; // Abbassa forzatamente la cresta al bot
+                        }
                     }
-                    
-                    // Converte la percentuale (0-1) in punti reali (0-120)
-                    // Sottrae 2 punti come "margine di sicurezza" per non scommettere tutto
-                    maxPotential = Math.floor(maxPts * 120) - 2; 
-                    
-                    // Salva la mossa geniale da fare se vince l'asta
-                    let calledSuit = SUITS[Math.floor(bestIndex / 10)];
-                    let calledValue = VALUES[bestIndex % 10];
-                    plannedCall = { suit: calledSuit, value: calledValue };
                 });
             } else {
                 // Se stai ancora addestrando, tira a caso
